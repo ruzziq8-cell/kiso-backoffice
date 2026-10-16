@@ -197,8 +197,11 @@ const MP=["Shopee","TikTok Shop"];
 const CHANNELS=[...MP,"Offline","Lainnya"];
 const ORDER_ST={baru:["Baru","acc"],dikirim:["Dikirim","warn"],selesai:["Selesai","good"],batal:["Batal","bad"],gagal:["Batal setelah dikirim","bad"],pending:["Belum dibayar","warn"]};
 /* goods physically left the warehouse: sold orders plus orders cancelled after the courier picked them up */
-const leftStock=o=>counts(o)||o.status==="gagal";
-const counts=o=>o.status!=="batal"&&o.status!=="pending";
+/* free samples (manual order marked as sample, or every item priced 0): stock goes out, but no sales/omzet; their HPP is a promotion cost */
+const SAMPLE_T={gratis:"Sampel gratis",affiliate:"Sampel affiliator"};
+const isSample=o=>!o.imported&&(!!SAMPLE_T[o.sample]||((o.items||[]).length>0&&(o.items||[]).every(it=>!(+it.price))&&!(+o.fee)));
+const leftStock=o=>counts(o)||o.status==="gagal"||(isSample(o)&&o.status!=="batal"&&o.status!=="pending");
+const counts=o=>o.status!=="batal"&&o.status!=="pending"&&!isSample(o);
 const BUY_ST={dipesan:["Dipesan","warn"],diterima:["Diterima","good"],batal:["Batal","bad"]};
 const ASSET="Aset tetap";
 const OUT_CAT=["Gaji","Listrik","Internet / WiFi","Sewa","Air","Transport & bensin","ATK & perlengkapan","Konsumsi","Ongkir di luar marketplace","Iklan Shopee","Iklan TikTok","Affiliate","Biaya bank & admin","Lain-lain",ASSET,"Prive / ambil pemilik"];
@@ -436,6 +439,7 @@ function monthPL(m=M(),ch=null){
   const incomeBy={},addInc=(k,v)=>{if(v)incomeBy[k]=(incomeBy[k]||0)+v;};
   if(!ch)for(const c of S.cash.filter(im)){if(EXCL.includes(c.category))continue;if(c.type==="keluar")outBy[c.category]=(outBy[c.category]||0)+(+c.amount||0);else addInc(c.category,+c.amount||0);}
   for(const a of derive().adj)if((a.date||"").slice(0,7)===m&&(!ch||a.ch===ch)){const v=+a.amt||0;if(/iklan/i.test(a.type))continue;if(v>0)addInc(`${a.type} (${a.ch})`,v);else outBy["Penyesuaian marketplace"]=(outBy["Penyesuaian marketplace"]||0)-v;}
+  if(!ch){let sh=0;for(const o of ORD())if(im(o)&&isSample(o)&&o.status!=="batal"&&o.status!=="pending")sh+=orderTotals(o).hpp;if(sh)outBy["Sampel & promosi (HPP produk)"]=(outBy["Sampel & promosi (HPP produk)"]||0)+sh;}
   const adsUse=!ch||ch===TT?S.adsdaily.filter(im).reduce((a,d)=>a+(+d.spend||0),0):0;if(adsUse)outBy["Iklan TikTok"]=(outBy["Iklan TikTok"]||0)+adsUse;
   const spAds=!ch||ch===SP?shopeeAdSpend(m):0;if(spAds)outBy["Iklan Shopee"]=(outBy["Iklan Shopee"]||0)+spAds;
   const ads=ADS.reduce((a,k)=>a+(outBy[k]||0),0),aff=outBy["Affiliate"]||0;
@@ -677,7 +681,7 @@ V.sales=()=>{
   const body=shown.map(([o,t])=>{const st=ORDER_ST[o.status]||ORDER_ST.baru;
     const pay=MP.includes(o.channel)?(t.settled?`<span class="pill good">Cair ${fdate(t.sdate)}</span>`:`<span class="pill">Piutang</span>`):`<span class="pill good">${esc(aname(o.account))}</span>`;
     const attrs=o.imported?`title="Diimpor dari file ${esc(o.channel)}${o.src?" · sumber "+esc(o.src):""}"`:`class="click" data-edit="order" data-id="${o.id}"`;
-    return`<tr ${attrs}><td>${fdate(o.date)}${o.time?`<div class="hint">${esc(o.time)}</div>`:""}</td><td>${esc(o.channel)}${o.imported?' <span class="pill acc">Impor</span>':""}</td><td>${esc(o.ref||"–")}</td><td class="wrapcell">${(o.items||[]).map(it=>`${esc(pname(it.productId,pm))} ×${num(+it.qty)}`).join(", ")}</td><td><span class="pill ${st[1]}">${st[0]}</span></td><td>${pay}</td><td class="n">${rp(t.gross)}</td><td class="n mut">${t.est?"≈ ":""}${rp(t.fee)}${t.refund?`<div class="hint">retur ${rp(t.refund)}</div>`:""}</td><td class="n">${rp(t.net)}</td></tr>`}).join("");
+    return`<tr ${attrs}><td>${fdate(o.date)}${o.time?`<div class="hint">${esc(o.time)}</div>`:""}</td><td>${esc(o.channel)}${o.imported?' <span class="pill acc">Impor</span>':""}</td><td>${esc(o.ref||"–")}</td><td class="wrapcell">${(o.items||[]).map(it=>`${esc(pname(it.productId,pm))} ×${num(+it.qty)}`).join(", ")}</td><td><span class="pill ${st[1]}">${st[0]}</span>${isSample(o)?` <span class="pill acc">${SAMPLE_T[o.sample]||"Sampel (Rp0)"}</span>`:""}</td><td>${pay}</td><td class="n">${isSample(o)?'<span class="mut">bukan omzet</span>':rp(t.gross)}</td><td class="n mut">${t.est?"≈ ":""}${rp(t.fee)}${t.refund?`<div class="hint">retur ${rp(t.refund)}</div>`:""}</td><td class="n">${rp(t.net)}</td></tr>`}).join("");
   const est=derive().rate;
   return`<div class="row"><h2>Penjualan</h2><div class="sp"></div>${S.canWrite?`<button class="btn" data-import>Impor file marketplace</button>`:""}${btn("order","+ Pesanan manual",1)}</div>
   <div class="chips">${["Semua",...CHANNELS].map(c=>`<button data-chan="${c}" aria-pressed="${c===salesFilter}">${c}</button>`).join("")}</div>
@@ -1675,7 +1679,7 @@ function openForm(kind,id,preset){
     const isMp=MP.includes(r.channel||"Shopee");
     f=`<h2>${id?"Ubah pesanan":"Pesanan baru"}</h2><div class="fgrid">
       ${F("Tanggal",inp("date",r.date||defDate(),"date","required"))}${F("Channel",`<select name="channel" id="ochan">${opt(CHANNELS,r.channel||"Shopee")}</select>`)}
-      ${F("No. pesanan",inp("ref",r.ref,"text",'placeholder="opsional"'))}${F("Status",`<select name="status">${opt(Object.entries(ORDER_ST).map(([k,v])=>[k,v[0]]),r.status||"selesai")}</select>`)}</div>
+      ${F("No. pesanan",inp("ref",r.ref,"text",'placeholder="opsional"'))}${F("Jenis",`<select name="sample"><option value="">Penjualan</option>${Object.entries(SAMPLE_T).map(([k,v])=>`<option value="${k}" ${r.sample===k?"selected":""}>${v} (tidak dihitung omzet)</option>`).join("")}</select>`)}${F("Status",`<select name="status">${opt(Object.entries(ORDER_ST).map(([k,v])=>[k,v[0]]),r.status||"selesai")}</select>`)}</div>
       <div class="items" id="items">${(r.items?.length?r.items:[{}]).map(it=>itemRow("order",it)).join("")}</div>
       <div><button type="button" class="btn sm" data-add>+ Tambah produk</button></div>
       <div class="fgrid">${F("Potongan marketplace (admin, layanan, voucher toko)",money("fee",r.fee??0))}
@@ -1900,7 +1904,7 @@ dform.addEventListener("submit",async e=>{
   let data;
   if(k==="order"){const its=items();if(!its.length){toast("Pilih minimal satu produk");return;}
     const oldH=Object.fromEntries((prev?.items||[]).map(i=>[i.productId,i.hpp]));
-    data={date:g("date"),channel:g("channel"),ref:g("ref"),status:g("status"),fee:+g("fee")||0,note:g("note"),account:MP.includes(g("channel"))?"":g("account"),
+    data={date:g("date"),channel:g("channel"),ref:g("ref"),sample:g("sample")||"",status:g("status"),fee:+g("fee")||0,note:g("note"),account:MP.includes(g("channel"))?"":g("account"),
       items:its.map(i=>({productId:i.id,qty:i.qty,price:i.price,hpp:oldH[i.id]??(+byId("products",i.id)?.hpp||0)}))};
   }else if(k==="buy"){const its=items();if(!its.length){toast("Pilih minimal satu barang");return;}
     const paid=g("paid")==="1";
