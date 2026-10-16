@@ -36,7 +36,9 @@ header{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:va
 .month{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
 nav{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
 nav::-webkit-scrollbar{display:none}
-nav button{border:0;background:none;color:var(--muted);font:600 14px var(--body);padding:10px 14px;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}
+@media (min-width:760px){nav{flex-wrap:wrap;overflow:visible;row-gap:0}}
+@media (max-width:759px){nav{scrollbar-width:thin;padding-bottom:2px}nav::-webkit-scrollbar{display:block;height:3px}nav::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}}
+nav button{border:0;background:none;color:var(--muted);font:600 14px var(--body);padding:10px 11px;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}
 nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 main{padding-block:20px 60px;display:grid;gap:20px}
 h2{font-family:var(--display);font-size:22px;margin:0;letter-spacing:-.01em;text-wrap:balance}
@@ -1419,6 +1421,7 @@ function render(){
   monthSel.parentElement.hidden=false;
   if(S.db&&ME.ready&&!canTab(tab)){const f=Object.keys(TAB_NAME).find(canTab);if(f)tab=f;}
   document.querySelectorAll("#tabs button").forEach(b=>{b.setAttribute("aria-selected",b.dataset.tab===tab);b.hidden=!!S.db&&(!ME.ready||!canTab(b.dataset.tab));});
+  document.querySelector(`#tabs [data-tab="${tab}"]`)?.scrollIntoView?.({block:"nearest",inline:"nearest"});
   document.querySelector(".brand").firstChild.textContent=(S.settings.storeName||"KISO.ID")+" ";
   let html=S.db===false?`<div class="banner">Database tidak tersedia di tampilan ini. Buka halaman ini dalam keadaan login di claude.ai untuk menyimpan data.</div>`:"";
   if(S.db&&!S.canWrite&&(ME.owner||ME.role==="pemilik"))html+=`<div class="banner">Mode lihat saja: akun ini bisa membuka semua modul, tapi tidak bisa menambah, mengubah, menghapus, atau mengimpor data.</div>`;
