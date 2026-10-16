@@ -1245,11 +1245,11 @@ async function deleteImports(){
 function mergeReports(kind,start,end,ch){
   const rs=S.adsreports.filter(r=>r.kind===kind&&(r.ch||TT)===ch&&r.from<=end&&r.to>=start).sort((a,b)=>(mdays(b.from,b.to)-mdays(a.from,a.to))||b.to.localeCompare(a.to)),use=[];
   for(const r of rs)if(!use.some(u=>u.from<=r.from&&u.to>=r.to))use.push(r);
-  if(!use.length)return null;if(use.length===1)return use[0];
-  const key={product:x=>x.camp+"|"+x.prod,livecampaign:x=>x.camp,prodcampaign:x=>x.camp,live:x=>x.id,creative:x=>x.id||x.title,creativeprod:x=>x.id||x.title,cardtraffic:x=>x.date,livedaily:x=>x.date,shopeetraffic:x=>x.date,shopeesalesov:x=>x.date,shopeevoucher:x=>x.date,shopeesku:x=>x.code,shopeecard:x=>x.code}[kind]||(x=>JSON.stringify(x));
-  const SUM=["spend","orders","gmv","views","impr","clicks","cart","buyers","viewers","sessions","withGmv","watch","sales","visitors","cartUsers","likes","search"],by=new Map();
-  for(const r of use)for(const x of r.rows||[]){const k=key(x),y=by.get(k);if(!y){by.set(k,{...x});continue;}if(/^(cardtraffic|livedaily|shopeetraffic|shopeesalesov|shopeevoucher)$/.test(kind))continue;for(const f of SUM)if(f in x)y[f]=(+y[f]||0)+(+x[f]||0);}
-  const rows=[...by.values()].sort((a,b)=>/^(cardtraffic|livedaily|shopeetraffic|shopeesalesov|shopeevoucher)$/.test(kind)?a.date.localeCompare(b.date):((b.spend||b.sales||0)-(a.spend||a.sales||0)));
+  if(!use.length)return null;if(use.length===1&&!(kind==="shopeefunnel"&&new Set((use[0].rows||[]).map(x=>x.date)).size<(use[0].rows||[]).length))return use[0];
+  const key={product:x=>x.camp+"|"+x.prod,livecampaign:x=>x.camp,prodcampaign:x=>x.camp,live:x=>x.id,creative:x=>x.id||x.title,creativeprod:x=>x.id||x.title,cardtraffic:x=>x.date,livedaily:x=>x.date,shopeetraffic:x=>x.date,shopeesalesov:x=>x.date,shopeevoucher:x=>x.date,shopeesku:x=>x.code,shopeecard:x=>x.code,shopeefunnel:x=>x.date,shopeeaff:x=>x.order}[kind]||(x=>JSON.stringify(x));
+  const SUM=["spend","orders","gmv","views","impr","clicks","cart","buyers","viewers","sessions","withGmv","watch","sales","visitors","cartUsers","likes","search","units"],by=new Map();
+  for(const r of use)for(const x of r.rows||[]){const k=key(x),y=by.get(k);if(!y){by.set(k,{...x});continue;}if(/^(cardtraffic|livedaily|shopeetraffic|shopeesalesov|shopeevoucher|shopeeaff)$/.test(kind))continue;for(const f of SUM)if(f in x)y[f]=(+y[f]||0)+(+x[f]||0);}
+  const rows=[...by.values()].sort((a,b)=>/^(cardtraffic|livedaily|shopeetraffic|shopeesalesov|shopeevoucher|shopeefunnel)$/.test(kind)?a.date.localeCompare(b.date):((b.spend||b.sales||0)-(a.spend||a.sales||0)));
   const summary={};for(const r of use)for(const [k,v] of Object.entries(r.summary||{})){if(typeof v==="number")summary[k]=(summary[k]||0)+v;
     else if(Array.isArray(v)){const m=new Map((summary[k]||[]).map(o=>[o.code+"|"+(o.name||o.variant||o.range||o.type),o]));for(const o of v){const kk=o.code+"|"+(o.name||o.variant||o.range||o.type),y=m.get(kk);if(!y){m.set(kk,{...o});continue;}for(const [f,x] of Object.entries(o))if(typeof x==="number")y[f]=(+y[f]||0)+x;}summary[k]=[...m.values()];}}
   return{...use[0],rows,summary,from:use.map(r=>r.from).sort()[0],to:use.map(r=>r.to).sort().slice(-1)[0],parts:use.length};
@@ -1383,13 +1383,13 @@ function genericHtml(ch,start,end){
 }
 V.adsShopee=()=>{
   const m=M(),start=m+"-01",end=endOf(m),T0=today();
-  const rep=k=>S.adsreports.filter(r=>r.kind===k&&r.from<=end&&r.to>=start).sort((a,b)=>b.to.localeCompare(a.to))[0];
+  const rep=k=>mergeReports(k,start,end,SP);
   const fr=rep("shopeefunnel"),src=rep("shopeesource"),af=rep("shopeeaff");
   const days=(fr?.rows||[]).filter(d=>d.date>=start&&d.date<=end);
   const os=ORD().filter(o=>o.channel===SP&&inMonth(o)&&counts(o));let g=0,units=0;for(const o of os){const t=orderTotals(o);g+=t.gross;units+=t.qty;}
   const sum=k=>days.reduce((a,d)=>a+(+d[k]||0),0),V0=sum("visitors"),C0=sum("cart"),B0=sum("buyers");
   const cs=chStats(m).find(x=>x.ch===SP),be=cs?.be,cmr=cs&&cs.gross?cs.cm/cs.gross:0;
-  const ar=shopeeAdsSet().filter(r=>r.from<=end&&r.to>=start),camps=ar.flatMap(r=>r.rows.map(x=>({...x,per:r})));
+  const ar=shopeeAdsSet().filter(r=>r.from<=end&&r.to>=start),camps=(()=>{const m=new Map();for(const r of ar)for(const x of r.rows){const k=x.name+"|"+x.mode+"|"+x.code,y=m.get(k);if(!y){m.set(k,{...x,per:r});continue;}for(const f of ["spend","clicks","views","conv","units","gmv","gmvd","cart"])y[f]=(+y[f]||0)+(+x[f]||0);y.status=x.status;}return[...m.values()];})();
   const aT=k=>camps.reduce((a,x)=>a+(+x[k]||0),0),aSp=aT("spend"),aG=aT("gmv"),aC=aT("clicks"),aV=aT("views"),aCv=aT("conv");
   const top=S.settles.filter(d=>d.ch===SP&&inMonth(d)).reduce((a,d)=>a+(d.rows||[]).reduce((x,r)=>x+(+r.a||0),0),0),man=S.cash.filter(c=>inMonth(c)&&c.type==="keluar"&&c.category==="Iklan Shopee").reduce((a,c)=>a+(+c.amount||0),0);
   const imp=S.canWrite?`<button class="btn" data-import>Impor file marketplace</button>`:"";
