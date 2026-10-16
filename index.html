@@ -1338,6 +1338,36 @@ function skuStats(m,ch,from,to){
   }
   return Object.values(P).map(r=>{const n=r.orders.size,cm=r.gross-r.fee-r.hpp,profit=cm-r.ads;return{...r,name:pname(r.id,pm),n,cm,profit,aov:n?r.gross/n:null,roas:r.ads?r.adsGmv/r.ads:null,be:cm>0?r.gross/cm:null,acos:r.adsGmv?r.ads/r.adsGmv:null,tacos:r.gross?r.ads/r.gross:null,roi:r.ads?profit/r.ads:null,margin:r.gross?profit/r.gross:null};});
 }
+/* change history (website version): every add/change/delete is logged by the database with the user's ID */
+const AUD_COLL={products:"Produk",materials:"Bahan",production:"Produksi",orders:"Pesanan manual",purchases:"Pembelian",cash:"Kas/beban",moves:"Penyesuaian stok",accounts:"Rekening",transfers:"Transfer",receipts:"Pencairan manual",recurring:"Beban rutin",orderdays:"Impor pesanan",settles:"Impor pencairan",adsdaily:"Impor iklan harian",adsreports:"Impor laporan/analitik",returns:"Retur pembeli",supreturns:"Retur ke supplier",suppliers:"Supplier",appay:"Bayar hutang",apopen:"Hutang awal",config:"Pengaturan",profiles:"Pengguna"};
+const AUD_TAB={sales:["orders","orderdays","returns"],buy:["purchases","suppliers","supreturns"],ap:["appay","apopen","suppliers","purchases"],stock:["products","materials","production","moves","returns","supreturns"],price:["products","materials"],cost:["cash","recurring"],bank:["accounts","transfers","cash"],ar:["receipts","settles","config"],ads:["adsdaily","adsreports"],set:null,dash:null,daily:["orderdays","settles","adsdaily"],report:null};
+const AUD_ACT={insert:["Tambah","good"],update:["Ubah","warn"],delete:["Hapus","bad"]};
+function auditDesc(e){
+  const i=e.info||{},pm=pmap(),bits=[];
+  if(e.coll==="production")bits.push(i.type==="buka"?`Buka ${num(i.qty)} karton`:`Packing ${pname(i.productId,pm)} ×${num(i.qty)}`);
+  else if(e.coll==="moves"){const[t,id]=(i.target||"").split(":");bits.push(`${ADJ_T[i.type]||i.type||""} ${t==="p"?pname(id,pm):matName(id)} ${num(i.qty)}`);}
+  else if(e.coll==="profiles")bits.push(`${i.name} → ${ROLES[i.role]?.name||i.role}${i.active===false?" (nonaktif)":""}`);
+  else{if(i.name)bits.push(i.name);if(i.category)bits.push(i.category);if(i.supplier)bits.push(i.supplier);if(i.productId)bits.push(pname(i.productId,pm));if(i.qty!=null&&e.coll!=="production")bits.push(`qty ${num(i.qty)}`);if(i.amount!=null)bits.push(rp(i.amount));if(i.ch)bits.push(i.ch);if(i.count!=null)bits.push(`${num(i.count)} baris`);if(i.kind)bits.push(i.kind);}
+  if(i.date)bits.push(fdate(i.date));else if(i.from)bits.push(`${fdate(i.from)}${i.to&&i.to!==i.from?" – "+fdate(i.to):""}`);
+  if(i.note)bits.push(`"${i.note}"`);
+  return bits.filter(Boolean).join(" · ")||e.doc_id;
+}
+function auditRows(list){
+  return`<div class="tbl"><table><thead><tr><th>Waktu</th><th>Oleh</th><th>Aksi</th><th>Data</th><th>Keterangan</th></tr></thead><tbody>${list.map(e=>{const a=AUD_ACT[e.action]||[e.action,""],t=new Date(e.at);
+    return`<tr><td style="white-space:nowrap">${t.toLocaleDateString("id-ID",{day:"2-digit",month:"2-digit",year:"2-digit"})} ${t.toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"})}</td><td><b>${esc(e.username||"sistem")}</b></td><td><span class="pill ${a[1]}">${a[0]}</span></td><td>${esc(AUD_COLL[e.coll]||e.coll)}</td><td class="wrapcell">${esc(auditDesc(e))}</td></tr>`;}).join("")}</tbody></table></div>`;
+}
+function auditPanel(t){
+  const cs=AUD_TAB[t];if(t==="set")return ME.role==="ceo"?auditFull():"";if(!cs)return"";
+  const list=S.audit.filter(e=>cs.includes(e.coll)).slice(0,60);
+  return`<details class="panel"><summary><h3 style="display:inline">Riwayat perubahan</h3> <span class="hint">${list.length?`terakhir: ${esc(list[0].username||"sistem")}, ${new Date(list[0].at).toLocaleString("id-ID",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}`:"belum ada perubahan"}</span></summary>
+  ${list.length?auditRows(list)+`<p class="hint">60 perubahan terakhir di modul ini. Riwayat dicatat otomatis oleh database dan tidak bisa diubah atau dihapus dari aplikasi.</p>`:""}</details>`;
+}
+let audUser="";
+function auditFull(){
+  const users=[...new Set(S.audit.map(e=>e.username||"sistem"))],list=S.audit.filter(e=>!audUser||(e.username||"sistem")===audUser).slice(0,200);
+  return`<div class="panel"><div class="row"><h3>Riwayat perubahan semua modul</h3><div class="sp"></div><div class="chips">${["",...users].map(u=>`<button data-auduser="${esc(u)}" aria-pressed="${u===audUser}">${u?esc(u):"Semua pengguna"}</button>`).join("")}</div></div>
+  ${list.length?auditRows(list):`<p class="hint">Belum ada perubahan tercatat.</p>`}<p class="hint">200 perubahan terakhir. Impor file tercatat per hari/laporan yang tersimpan.</p></div>`;
+}
 function adsChart(days){
   return colChart({label:"Biaya iklan dan GMV dari iklan per hari",series:[{name:"GMV dari iklan",color:"var(--s1)"},{name:"Biaya iklan",color:"var(--s2)"}],
     cols:days.map(d=>({x:String(+d.date.slice(8,10)),v:[d.gmv,d.spend],tip:[new Date(d.date+"T00:00").toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long"}),`[s1]GMV dari iklan ${rp(d.gmv)}`,`[s2]Biaya iklan ${rp(d.spend)}`,`ROAS ${d.spend?(d.gmv/d.spend).toFixed(2).replace(".",","):"–"} · ${num(d.orders)} pesanan`,d.orders?`Biaya per pesanan ${rp(d.spend/d.orders)}`:""].filter(Boolean).join("\n")}))});
@@ -1571,7 +1601,7 @@ function render(){
   if(S.db&&ME.ready&&ME.role){const R=ROLES[ME.role];S.canWrite=!!ME.canLvl&&R.write&&!(R.viewOnly||[]).includes(tab);}
   if(S.db&&ME.role&&(ROLES[ME.role].viewOnly||[]).includes(tab))html+=`<div class="banner">Modul ini hanya bisa dilihat untuk peran ${esc(ROLES[ME.role].name)}. Perubahan data stok dilakukan oleh Gudang atau CEO.</div>`;
   const who=S.db&&!ME.owner&&ME.role?`<div class="hint" style="margin:-4px 0 10px">Masuk sebagai <b>${esc(ROLES[ME.role].name)}</b> · ${esc(ROLES[ME.role].desc)}</div>`:"";
-  app.innerHTML=html+who+(V[tab]||V.dash)();
+  app.innerHTML=html+who+(V[tab]||V.dash)()+(S.audit?auditPanel(tab):"");
 }
 document.getElementById("tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-tab]");if(!b)return;tab=b.dataset.tab;try{localStorage.setItem("kiso.tab",tab)}catch(_){}render();window.scrollTo(0,0);});
 monthSel.addEventListener("change",()=>{salesLimit=300;dailyDay="";render();});
@@ -1593,6 +1623,7 @@ app.addEventListener("click",e=>{
   const ch=t.closest("[data-chan]");if(ch){salesFilter=ch.dataset.chan;render();return;}
   const adc=t.closest("[data-adsch]");if(adc){adsCh=adc.dataset.adsch;render();return;}
   const dch=t.closest("[data-dailych]");if(dch){dailyCh=dch.dataset.dailych;render();return;}
+  const au=t.closest("[data-auduser]");if(au){audUser=au.dataset.auduser;render();return;}
   const dsk=t.closest("[data-skusort]");if(dsk){skuSort=dsk.dataset.skusort;render();return;}
   const ac=t.closest("[data-acc]");if(ac){bankAcc=ac.dataset.acc;render();return;}
   if(!S.canWrite)return;
@@ -1981,9 +2012,14 @@ async function startApp(session){
   S.canWrite=ROLES[prof.role].write;ME.ready=true;AUTH.state="in";
   const db=makeDb(SB);S.db=db;
   if(prof.role==="ceo")loadUsers();
+  loadAudit();
   for(const name of COLLS)db.collection(name).onSnapshot(snap=>{S[name]=snap.docs.map(d=>({id:d.id,...d.data()}));DER=null;S.loaded[name]=1;render();},()=>{S.loaded[name]=1;render();});
   db.doc("config/main").onSnapshot(s=>{if(s.exists)S.settings={...S.settings,...s.data()};DER=null;S.loaded.settings=1;render();},()=>{S.loaded.settings=1;render();});
   render();
+}
+async function loadAudit(){
+  const{data,error}=await SB.from("audit_log").select("*").order("at",{ascending:false}).limit(500);if(error)return;S.audit=data||[];render();
+  let tm=null;SB.channel("kiso-audit").on("postgres_changes",{event:"INSERT",schema:"public",table:"audit_log"},p=>{S.audit.unshift(p.new);if(S.audit.length>800)S.audit.length=800;clearTimeout(tm);tm=setTimeout(render,400);}).subscribe();
 }
 async function loadUsers(){const{data}=await SB.from("profiles").select("*").order("created_at");S.users=data||[];render();}
 
