@@ -219,7 +219,7 @@ const COLLS=["products","materials","production","orders","purchases","cash","mo
 
 const S={settings:{storeName:"KISO.ID"},loaded:{},db:null,canWrite:true,team:[],teamreq:[]};
 COLLS.forEach(c=>S[c]=[]);
-let tab="dash",dailyCh="Semua",salesFilter="Semua",bankAcc=null,salesLimit=300,adsCh="Ringkasan";
+let tab="dash",dailyCh="Semua",dailyDay="",skuSort="profit",salesFilter="Semua",bankAcc=null,salesLimit=300,adsCh="Ringkasan";
 try{tab=localStorage.getItem("kiso.tab")||"dash";}catch(e){}
 const today=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);};
 const monthSel=document.getElementById("monthSel");
@@ -588,6 +588,16 @@ V.daily=()=>{
     <div class="tbl"><table><thead><tr><th>Tanggal</th><th class="n">Pesanan</th><th class="n">Omzet kotor</th><th class="n">vs kemarin</th><th class="n">Potongan & retur</th><th class="n">HPP</th><th class="n">Laba kotor</th><th class="n">Biaya iklan</th><th class="n">Laba setelah iklan</th><th class="n">Margin</th></tr></thead>
     <tbody>${rows.map(r1).join("")}</tbody><tfoot>${tot}<td class="n">${num(T.n)}</td><td class="n">${rp(T.gross)}</td><td></td><td class="n">${rp0(-(T.fee+T.refund))}</td><td class="n">${rp0(-T.hpp)}</td><td class="n">${rp0(T.cm)}</td><td class="n">${rp0(-T.ads)}</td><td class="n ${T.profit<0?"neg":""}">${rp0(T.profit)}</td><td class="n">${pc(T.gross?T.profit/T.gross:null)}</td></tr></tfoot></table></div>
     <p class="hint">Potongan pesanan yang belum cair masih estimasi dan otomatis diganti angka asli setelah file income diimpor. Beban operasional (gaji, listrik, dll.) dan penyusutan tidak dibagi per hari; lihat laba rugi bulanan di Dashboard.</p></div>
+  ${(()=>{const days=rows.filter(x=>x.n).map(x=>x.date),from=dailyDay&&days.includes(dailyDay)?dailyDay:m+"-01",to=dailyDay&&days.includes(dailyDay)?dailyDay:endOf(m);
+    const K=skuStats(m,dailyCh,from,to).filter(r=>r.gross>0||r.ads>0),key={profit:r=>-r.profit,gross:r=>-r.gross,roas:r=>-(r.roas||0),roi:r=>-(r.roi??-1e9),tacos:r=>r.tacos??9,margin:r=>-(r.margin??-9)}[skuSort]||(r=>-r.profit);K.sort((a,b)=>key(a)-key(b));
+    const sb=(k,l)=>`<button data-skusort="${k}" aria-pressed="${skuSort===k}">${l}</button>`;
+    const T=K.reduce((a,r)=>{for(const k of ["units","gross","fee","hpp","ads","adsGmv","cm","profit","n"])a[k]+=r[k];return a;},{units:0,gross:0,fee:0,hpp:0,ads:0,adsGmv:0,cm:0,profit:0,n:0});
+    return`<div class="panel"><div class="row"><h3>Indikator per SKU</h3><div class="sp"></div><label class="hint" style="display:flex;gap:6px;align-items:center">Tanggal <select id="dailyDay"><option value="">Sebulan penuh</option>${days.map(d=>`<option value="${d}" ${d===dailyDay?"selected":""}>${fdate(d)}</option>`).join("")}</select></label></div>
+    <div class="chips" style="margin:2px 0 8px">Urutkan: ${sb("profit","Laba setelah iklan")}${sb("roi","ROI")}${sb("roas","ROAS")}${sb("margin","Margin")}${sb("tacos","TACOS terendah")}${sb("gross","Omzet")}</div>
+    <div class="tbl"><table><thead><tr><th>SKU</th><th class="n">Unit</th><th class="n">Omzet</th><th class="n">AOV</th><th class="n">Laba kotor</th><th class="n">Biaya iklan (est.)</th><th class="n">Laba setelah iklan</th><th class="n">Margin</th><th class="n">ROAS</th><th class="n">ROAS impas</th><th class="n">ROI</th><th class="n">ACOS</th><th class="n">TACOS</th></tr></thead><tbody>
+    ${K.map(r=>`<tr><td>${esc(r.name)}${r.direct?' <span class="pill acc" title="Punya kampanye iklan khusus SKU ini">iklan khusus</span>':""}</td><td class="n">${num(r.units)}</td><td class="n">${rp(r.gross)}</td><td class="n">${r.aov!=null?rp0(r.aov):"–"}</td><td class="n">${rp0(r.cm)}</td><td class="n mut">${rp0(-r.ads)}</td><td class="n ${r.profit<0?"neg":"pos"}"><b>${rp0(r.profit)}</b></td><td class="n">${pc(r.margin)}</td><td class="n">${r.roas!=null?roasPill(r.roas,r.be):"–"}</td><td class="n">${f2(r.be)}</td><td class="n ${r.roi!=null&&r.roi<0?"neg":""}">${pc(r.roi)}</td><td class="n">${pc(r.acos)}</td><td class="n">${pc(r.tacos)}</td></tr>`).join("")}</tbody>
+    <tfoot><tr style="font-weight:700"><td>Total</td><td class="n">${num(T.units)}</td><td class="n">${rp(T.gross)}</td><td></td><td class="n">${rp0(T.cm)}</td><td class="n">${rp0(-T.ads)}</td><td class="n ${T.profit<0?"neg":""}">${rp0(T.profit)}</td><td class="n">${pc(T.gross?T.profit/T.gross:null)}</td><td class="n">${f2(T.ads?T.adsGmv/T.ads:null)}</td><td class="n">${f2(T.cm>0?T.gross/T.cm:null)}</td><td class="n">${pc(T.ads?T.profit/T.ads:null)}</td><td class="n">${pc(T.adsGmv?T.ads/T.adsGmv:null)}</td><td class="n">${pc(T.gross?T.ads/T.gross:null)}</td></tr></tfoot></table></div>
+    <p class="hint"><b>Biaya iklan per SKU adalah estimasi.</b> Marketplace tidak memberi biaya iklan per variasi, jadi: kampanye yang namanya menyebut satu SKU (mis. "KISO ISI 2", "Isi 6 Kiso …") dibebankan ke SKU itu (<span class="pill acc">iklan khusus</span>); sisa biaya iklan channel (produk utama/hero, LIVE, iklan otomatis) dibagi menurut porsi omzet tiap SKU di channel itu. Karena itu ROAS SKU tanpa iklan khusus mendekati rata-rata channel; yang paling membedakan antar-SKU adalah <b>ROAS impas, margin, dan ROI</b>. Potongan marketplace dibagi menurut porsi harga di tiap pesanan. Total biaya iklan sama dengan tabel harian di atas.</p></div>`;})()}
   <div class="panel"><h3>Indikator iklan & penjualan harian</h3>
     <div class="tbl"><table><thead><tr><th>Tanggal</th><th class="n">ROAS</th><th class="n">ROAS impas</th><th class="n">Biaya / pesanan iklan</th><th class="n">ROI</th><th class="n">AOV</th><th class="n">ACOS</th><th class="n">TACOS</th><th class="n">CTR iklan</th></tr></thead>
     <tbody>${rows.map(r2).join("")}</tbody><tfoot>${tot}<td class="n">${f2(T.roas)}</td><td class="n">${f2(T.be)}</td><td class="n">${T.cpo!=null?rp0(T.cpo):"–"}</td><td class="n">${pc(T.roi)}</td><td class="n">${T.aov!=null?rp0(T.aov):"–"}</td><td class="n">${pc(T.acos)}</td><td class="n">${pc(T.tacos)}</td><td class="n">${pc(T.ctr)}</td></tr></tfoot></table></div>
@@ -1294,6 +1304,29 @@ function dailyStats(m=M(),ch="Semua"){
   }
   return D;
 }
+/* per-SKU sales, margin and an ESTIMATED ad cost: campaigns named after one SKU ("Isi 2 …") are charged to that SKU,
+   the rest of the channel's ad cost (hero listing, LIVE, auto ads) is spread by each SKU's share of that channel's sales */
+function skuStats(m,ch,from,to){
+  const start=m+"-01",end=endOf(m),chans=ch==="Semua"?[TT,SP]:[ch],P={},pm=pmap();
+  const skuOf=name=>{const n=(/isi\s*(\d+)/i.exec(name||"")||[])[1];return n?S.products.find(p=>+p.pcs===+n&&!p.manualOnly)?.id:null;};
+  const row=id=>P[id]||={id,orders:new Set(),units:0,gross:0,fee:0,hpp:0,ads:0,adsGmv:0,direct:false,byCh:{}};
+  const chSales={};
+  for(const o of ORD())if(o.date>=from&&o.date<=to&&counts(o)&&(ch==="Semua"||o.channel===ch)){
+    const t=orderTotals(o);for(const it of o.items||[]){const g=(+it.qty||0)*(+it.price||0),sh=t.gross?g/t.gross:(t.qty?(+it.qty||0)/t.qty:0),r=row(it.productId);
+      r.orders.add(o.id||o.ref);r.units+=+it.qty||0;r.gross+=g;r.fee+=(t.fee+(t.refund||0))*sh;r.hpp+=(+it.qty||0)*(+it.hpp||hppOf(it.productId));
+      r.byCh[o.channel]=(r.byCh[o.channel]||0)+g;chSales[o.channel]=(chSales[o.channel]||0)+g;}}
+  for(const c of chans){
+    const D=dailyStats(m,c).filter(x=>x.date>=from&&x.date<=to),A=D.reduce((a,x)=>a+x.ads,0),G=D.reduce((a,x)=>a+x.adsGmv,0);if(!A&&!G)continue;
+    const rows=c===TT?(mergeReports("product",start,end,TT)?.rows||[]).map(x=>({name:x.camp+" "+x.prod,spend:x.spend,gmv:x.gmv})):shopeeAdsSet().filter(r=>r.from<=end&&r.to>=start).flatMap(r=>r.rows.map(x=>({name:x.name,spend:x.spend,gmv:x.gmv})));
+    const RT=rows.reduce((a,x)=>a+(+x.spend||0),0),RG=rows.reduce((a,x)=>a+(+x.gmv||0),0),dS={},dG={};
+    for(const x of rows){const id=/isi\s*\d+/i.test(x.name.replace(/\[.*?\]/g,""))?skuOf(x.name.replace(/\[.*?\]/g,"")):null;if(id){dS[id]=(dS[id]||0)+(+x.spend||0);dG[id]=(dG[id]||0)+(+x.gmv||0);}}
+    let usedA=0,usedG=0;
+    for(const id in dS){const r=row(id);const a=RT?A*dS[id]/RT:0,g=RG?G*dG[id]/RG:0;r.ads+=a;r.adsGmv+=g;r.direct=true;usedA+=a;usedG+=g;}
+    const tot=chSales[c]||0;
+    if(tot)for(const r of Object.values(P)){const sh=(r.byCh[c]||0)/tot;r.ads+=(A-usedA)*sh;r.adsGmv+=(G-usedG)*sh;}
+  }
+  return Object.values(P).map(r=>{const n=r.orders.size,cm=r.gross-r.fee-r.hpp,profit=cm-r.ads;return{...r,name:pname(r.id,pm),n,cm,profit,aov:n?r.gross/n:null,roas:r.ads?r.adsGmv/r.ads:null,be:cm>0?r.gross/cm:null,acos:r.adsGmv?r.ads/r.adsGmv:null,tacos:r.gross?r.ads/r.gross:null,roi:r.ads?profit/r.ads:null,margin:r.gross?profit/r.gross:null};});
+}
 function adsChart(days){
   return colChart({label:"Biaya iklan dan GMV dari iklan per hari",series:[{name:"GMV dari iklan",color:"var(--s1)"},{name:"Biaya iklan",color:"var(--s2)"}],
     cols:days.map(d=>({x:String(+d.date.slice(8,10)),v:[d.gmv,d.spend],tip:[new Date(d.date+"T00:00").toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long"}),`[s1]GMV dari iklan ${rp(d.gmv)}`,`[s2]Biaya iklan ${rp(d.spend)}`,`ROAS ${d.spend?(d.gmv/d.spend).toFixed(2).replace(".",","):"–"} · ${num(d.orders)} pesanan`,d.orders?`Biaya per pesanan ${rp(d.spend/d.orders)}`:""].filter(Boolean).join("\n")}))});
@@ -1528,7 +1561,8 @@ function render(){
   app.innerHTML=html+who+(V[tab]||V.dash)();
 }
 document.getElementById("tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-tab]");if(!b)return;tab=b.dataset.tab;try{localStorage.setItem("kiso.tab",tab)}catch(_){}render();window.scrollTo(0,0);});
-monthSel.addEventListener("change",()=>{salesLimit=300;render();});
+monthSel.addEventListener("change",()=>{salesLimit=300;dailyDay="";render();});
+app.addEventListener("change",e=>{if(e.target.id==="dailyDay"){dailyDay=e.target.value;render();}});
 app.addEventListener("click",async e=>{
   const b=e.target.closest("[data-team]");if(!b)return;const a=b.dataset.team,id=b.dataset.id;
   try{
@@ -1546,6 +1580,7 @@ app.addEventListener("click",e=>{
   const ch=t.closest("[data-chan]");if(ch){salesFilter=ch.dataset.chan;render();return;}
   const adc=t.closest("[data-adsch]");if(adc){adsCh=adc.dataset.adsch;render();return;}
   const dch=t.closest("[data-dailych]");if(dch){dailyCh=dch.dataset.dailych;render();return;}
+  const dsk=t.closest("[data-skusort]");if(dsk){skuSort=dsk.dataset.skusort;render();return;}
   const ac=t.closest("[data-acc]");if(ac){bankAcc=ac.dataset.acc;render();return;}
   if(!S.canWrite)return;
   const ea=t.closest("[data-edit-acc]");if(ea){openForm("account",ea.dataset.editAcc);return;}
