@@ -985,6 +985,48 @@ function parseShopeeAnalytics(kind,wb,name){
     const ds=out.map(x=>x.date).filter(Boolean).sort();
     return{kind:"report",ch:SP,rkind:kind,name,label:"Konversi affiliate Shopee",rows:out.slice(0,1500),from:ds[0]||per[0],to:ds[ds.length-1]||per[1]};}
 }
+/* rows under the LAST header row containing key (Shopee puts a period summary table above the daily table) */
+function tableLast(rows,key){
+  let hi=-1;rows.forEach((r,i)=>{if(r.some(c=>clean(c)===key))hi=i;});if(hi<0)return[];
+  const h=rows[hi].map(clean),out=[];
+  for(const r of rows.slice(hi+1)){if(!r.some(c=>clean(c)!==""))break;const o={};h.forEach((k,j)=>{if(k&&!(k in o))o[k]=clean(r[j]);});out.push(o);}
+  return out;
+}
+const dmy1=t=>{t=clean(t);return /^\d{2}-\d{2}-\d{4}$/.test(t)?ymd(t):"";};
+const pctv=t=>nvi(String(t).replace("%",""))/100;
+const secs=t=>{const m=/(\d+):(\d+):(\d+)/.exec(clean(t));return m?+m[1]*3600+ +m[2]*60+ +m[3]:0;};
+/* Shopee files used for analytics only: none of these feed the profit & loss */
+function parseShopeeExtra(kind,wb,name){
+  let per=periodFromName(name)||[M()+"-01",endOf(M())];const R=(sh)=>sheetRows(wb.Sheets[sh]);
+  const ret=(label,rows,summary={})=>{const ds=rows.map(r=>r.date).filter(Boolean).sort();return{kind:"report",ch:SP,rkind:kind,name,label,rows,summary,from:ds[0]||per[0],to:ds[ds.length-1]||per[1],analytics:true};};
+  if(kind==="shopeetraffic"){const rows=tableLast(R(wb.SheetNames[0]),"Tanggal").map(r=>({date:dmy1(r["Tanggal"]),views:nvi(r["Produk Dilihat"]),visitors:nvi(r["Total Pengunjung"]),newv:nvi(r["Pengunjung Baru"]),oldv:nvi(r["Pengunjung Lama"]),bounce:pctv(r["Tingkat Pengunjung Melihat Tanpa Membeli"]),avgTime:secs(r["Rata-rata Waktu Dihabiskan"]),followers:nvi(r["Jumlah Pengikut Baru"])})).filter(x=>x.date);
+    return ret("Pengunjung toko Shopee (harian)",rows);}
+  if(kind==="shopeesalesov"){const rows=tableLast(R(wb.SheetNames[0]),"Tanggal").map(r=>({date:dmy1(r["Tanggal"]),visits:nvi(r["Total Pengunjung (Kunjungan)"]),buyers:nvi(r["Total Pembeli (Pesanan Dibuat)"]),units:nvi(r["Total Produk Dipesan"]),sales:nvi(r["Penjualan (Pesanan Dibuat) (IDR)"]),shipped:nvi(r["Penjualan (Pesanan Siap Dikirim) (IDR)"])})).filter(x=>x.date);
+    return ret("Tinjauan penjualan Shopee (harian)",rows);}
+  if(kind==="shopeevoucher"){
+    const days=tableLast(R("Grafik Kriteria"),"Waktu Promo").map(r=>({date:dmy1(r["Waktu Promo"]),claims:nvi(r["Klaim"]),orders:nvi(r["Pesanan (Pesanan Dibuat)"]),sales:nvi(r["Penjualan (Pesanan Dibuat) (IDR)"]),cost:nvi(r["Total Biaya (Pesanan Dibuat) (IDR)"]),shopee:nvi(r["Dukungan Shopee - Pesanan Dibuat (IDR)"]),seller:nvi(r["Kontribusi Penjual - Pesanan Dibuat (IDR)"])})).filter(x=>x.date);
+    const vouchers=(table(R("Rincian Performa"),"Nama Voucher")||[]).filter(r=>r["Nama Voucher"]).map(r=>({name:r["Nama Voucher"],code:r["Kode Voucher"],period:r["Periode Klaim"],status:r["Status"],by:r["Pembuat"],type:r["Tipe Voucher"],claims:nvi(r["Klaim"]),orders:nvi(r["Pesanan (Pesanan Dibuat)"]),sales:nvi(r["Penjualan (Pesanan Dibuat) (IDR)"]),cost:nvi(r["Total Biaya (Pesanan Dibuat) (IDR)"]),shopee:nvi(r["Dukungan Shopee - Pesanan Dibuat (IDR)"]),seller:nvi(r["Kontribusi Penjual - Pesanan Dibuat (IDR)"]),buyers:nvi(r["Pembeli (Pesanan Dibuat)"]),units:nvi(r["Produk Terjual (Pesanan Dibuat)"]),seen:nvi(r["Pengguna yang melihat notifikasi"]),followers:nvi(r["Jumlah Pengikut Baru"])}));
+    return ret("Performa voucher Shopee",days,{vouchers});}
+  if(kind==="shopeecomp"){const rows=R(wb.SheetNames[0]),grab=k=>tableLast(rows,k);
+    const price=grab("Rentang Harga (IDR)").map(r=>({range:r["Rentang Harga (IDR)"],buyers:nvi(r["Total Pembeli"]),sales:nvi(r["Penjualan (IDR)"]),conv:pctv(r["Tingkat Konversi"])}));
+    const type=grab("Tipe Pembeli").map(r=>({type:r["Tipe Pembeli"],buyers:nvi(r["Total Pembeli"]),sales:nvi(r["Penjualan (IDR)"]),conv:pctv(r["Tingkat Konversi"])}));
+    const pl=rows.find(r=>clean(r[0])==="Data Period"),pm=pl&&/(\d{2}-\d{2}-\d{4})-(\d{2}-\d{2}-\d{4})/.exec(clean(pl[1]));if(pm)per=[ymd(pm[1]),ymd(pm[2])];
+    return ret("Komposisi pembeli Shopee",[],{price,type});}
+  if(kind==="shopeesku"){const rows=(table(R(wb.SheetNames[0]),"Kode Produk")||[]).filter(r=>r["Kode Produk"]);
+    const prods=rows.filter(r=>clean(r["Nama Variasi"])==="-"||!clean(r["Nama Variasi"])).map(r=>({code:r["Kode Produk"],name:r["Produk"].slice(0,90),sales:nvi(r["Total Penjualan (Pesanan Dibuat) (IDR)"]),views:nvi(r["Jumlah Produk Dilihat"]),clicks:nvi(r["Produk Diklik"]),orders:nvi(r["Pesanan Dibuat"]),buyers:nvi(r["Total Pembeli (Pesanan Dibuat)"]),visitors:nvi(r["Pengunjung Produk (Kunjungan)"]),cartUsers:nvi(r["Pengunjung Produk (Menambahkan Produk ke Keranjang)"]),cart:nvi(r["Dimasukkan ke Keranjang (Produk)"]),likes:nvi(r["Suka"]),search:nvi(r["Klik Pencarian"]),repeat:pctv(r["Tingkat Pesanan Berulang (Pesanan Dibuat)"]),bounce:pctv(r["Tingkat Pengunjung Melihat Tanpa Membeli"])}));
+    const vars=rows.filter(r=>clean(r["Nama Variasi"])&&clean(r["Nama Variasi"])!=="-").map(r=>({code:r["Kode Produk"],variant:r["Nama Variasi"],sku:r["SKU Induk"],sales:nvi(r["Total Penjualan (Pesanan Dibuat) (IDR)"])}));
+    return ret("Performa produk & variasi Shopee",prods,{vars});}
+  if(kind==="shopeecard"){const rows=(table(R(wb.SheetNames[0]),"Kode Produk")||[]).filter(r=>r["Kode Produk"]).map(r=>({code:r["Kode Produk"],name:r["Produk"].slice(0,90),sales:nvi(r["Penjualan (IDR)"]),views:nvi(r["Jumlah Produk Dilihat"]),clicks:nvi(r["Produk Diklik"]),orders:nvi(r["Total Pesanan"]),buyers:nvi(r["Total Pembeli"])}));
+    return ret("Trafik kartu produk Shopee",rows);}
+}
+/* any other marketplace file: keep its first table as-is so it can be read in Analitik (never used in calculations) */
+function parseGeneric(wb,name,ch){
+  const per=periodFromName(name)||[today(),today()],sheets=[];
+  for(const sn of wb.SheetNames.slice(0,4)){const rows=sheetRows(wb.Sheets[sn]).map(r=>r.map(clean)).filter(r=>r.some(c=>c));if(!rows.length)continue;
+    const hi=rows.findIndex(r=>r.filter(Boolean).length>=3);const head=(hi<0?rows[0]:rows[hi]).slice(0,25),body=rows.slice((hi<0?0:hi)+1,(hi<0?0:hi)+151).map(r=>r.slice(0,25));sheets.push({sheet:sn,head,body,more:Math.max(0,rows.length-(hi+1)-150)});}
+  const base=name.replace(/\.(xlsx|xls|csv)$/i,"").replace(/[_.-]?\d{8}([_.-]+\d{8})?/g,"").replace(/[^A-Za-z]+/g,"-").replace(/^-|-$/g,"").toLowerCase().slice(0,40)||"file";
+  return{kind:"report",ch,rkind:"generic-"+base,name,label:`Data lain: ${name.replace(/\.(xlsx|xls|csv)$/i,"")}`,rows:[],summary:{sheets},from:per[0],to:per[1],analytics:true};
+}
 function table(rows,key){
   const hi=rows.findIndex(r=>r.some(c=>clean(c)===key));if(hi<0)return null;
   const h=rows[hi].map(clean);
@@ -997,7 +1039,7 @@ async function readBook(file){
 /* some marketplace exports declare a too-small sheet range; rebuild it from the cells actually present */
 function fixRef(ws){let r=0,c=0;for(const k in ws){if(k[0]==="!")continue;const a=XLSX.utils.decode_cell(k);if(a.r>r)r=a.r;if(a.c>c)c=a.c;}ws["!ref"]=XLSX.utils.encode_range({s:{r:0,c:0},e:{r,c}});return ws;}
 const sheetRows=ws=>XLSX.utils.sheet_to_json(fixRef(ws),{header:1,raw:false,defval:""});
-function periodFromName(n){let m=/(\d{4}-\d{2}-\d{2})_-_(\d{4}-\d{2}-\d{2})/.exec(n);if(m)return[m[1],m[2]];m=/(\d{4})(\d{2})(\d{2})(?:_-_|[-_])(\d{4})(\d{2})(\d{2})/.exec(n);return m?[`${m[1]}-${m[2]}-${m[3]}`,`${m[4]}-${m[5]}-${m[6]}`]:null;}
+function periodFromName(n){let m=/(\d{4}-\d{2}-\d{2})_-_(\d{4}-\d{2}-\d{2})/.exec(n);if(m)return[m[1],m[2]];m=/(\d{2})(\d{2})(20\d{2})-(\d{2})(\d{2})(20\d{2})/.exec(n);if(m&&+m[2]<=12&&+m[5]<=12)return[`${m[3]}-${m[2]}-${m[1]}`,`${m[6]}-${m[5]}-${m[4]}`];m=/(20\d{2})(\d{2})(\d{2})(?:_-_|[-_])(20\d{2})(\d{2})(\d{2})/.exec(n);if(m)return[`${m[1]}-${m[2]}-${m[3]}`,`${m[4]}-${m[5]}-${m[6]}`];m=/(?:^|[_.-])(20\d{2})(\d{2})(\d{2})(?:\d{6})?(?:[_.-]|$)/.exec(n);return m?[`${m[1]}-${m[2]}-${m[3]}`,`${m[1]}-${m[2]}-${m[3]}`]:null;}
 function matchProduct(sku,variation){
   const s=clean(sku).toUpperCase();
   let p=S.products.find(p=>[p.sku,...(p.aliases||[])].some(a=>a&&String(a).toUpperCase()===s));if(p)return p;
@@ -1078,7 +1120,7 @@ async function analyze(file){
     /* ---- Shopee ---- */
     if(wb.SheetNames.includes("Penghasilan")&&wb.SheetNames.includes("Summary"))return parseShopeeIncome(wb,file.name);
     if(hdr.has("No. Pesanan")&&hdr.has("Nomor Referensi SKU"))return parseShopeeOrders(table(first,"No. Pesanan"),file.name);
-    if(wb.SheetNames.some(n=>/Performa Terbaik/i.test(n)))return SKIP("Detail produk (parent SKU) Shopee","Penjualan per produk sudah dihitung dari file pesanan.");
+    if(wb.SheetNames.some(n=>/Performa Terbaik/i.test(n)))return parseShopeeExtra("shopeesku",wb,file.name);
     if(hdr.has("Nama Iklan")&&hdr.has("Efektifitas Iklan")){
       const pl=first.find(r=>clean(r[0])==="Periode"),pm=pl&&/(\d{2})\/(\d{2})\/(\d{4})\s*-\s*(\d{2})\/(\d{2})\/(\d{4})/.exec(clean(pl[1])),per=pm?[`${pm[3]}-${pm[2]}-${pm[1]}`,`${pm[6]}-${pm[5]}-${pm[4]}`]:(periodFromName(file.name)||[M()+"-01",endOf(M())]);
       const rows=(table(first,"Urutan")||[]).filter(r=>r["Nama Iklan"]).map(r=>({name:r["Nama Iklan"].slice(0,90),status:clean(r["Status"]),mode:clean(r["Mode Bidding"]),code:clean(r["Kode Produk"]),views:nv(r["Dilihat"]),clicks:nv(r["Jumlah Klik"]),cart:nv(r["Tambah ke Keranjang"]),conv:nv(r["Konversi"]),units:nv(r["Produk Terjual"]),gmv:nv(r["Omzet Penjualan"]),gmvd:nv(r["Penjualan Langsung (GMV Langsung)"]),spend:nv(r["Biaya"])}));
@@ -1086,13 +1128,12 @@ async function analyze(file){
     if(hdr.has("Kode Pesanan")&&hdr.has("Username Affiliate"))return parseShopeeAnalytics("shopeeaff",wb,file.name);
     if(hdr.has("Pengunjung Produk (Kunjungan)")&&hdr.has("Pengunjung Produk (Menambahkan Produk ke Keranjang)"))return parseShopeeAnalytics("shopeefunnel",wb,file.name);
     if(wb.SheetNames.some(n=>/^Asal Kunjungan/i.test(n))&&wb.SheetNames.includes("Pesanan Dibuat"))return parseShopeeAnalytics("shopeesource",wb,file.name);
-    if(hdr.has("Rata-rata Waktu Dihabiskan"))return SKIP("Traffic overview Shopee","Pengunjung harian sudah diambil dari file product overview, dan total pengunjung dari statistik toko.");
-    if(hdr.has("Penjualan per Pembeli (Pesanan Dibuat)")||(hdr.has("Total Pengunjung (Kunjungan)")&&hdr.has("Total Pembeli (Pesanan Dibuat)")))return SKIP("Sales overview Shopee","Isinya sama dengan statistik toko; penjualan dihitung dari file pesanan.");
-    if(hdr.has("Kategori Shopee"))return SKIP("Komposisi penjualan Shopee","Semua produk ada di satu kategori; penjualan sudah dihitung dari file pesanan.");
-    if(hdr.has("Rasio Penjualan")&&hdr.has("Kode Produk"))return SKIP("Trafik kartu produk Shopee","Penjualan per produk sudah dihitung dari file pesanan; corong pengunjung diambil dari product overview.");
-    if(hdr.has("Nama Voucher")||(wb.SheetNames.includes("Rincian Performa")&&hdr.has("Klaim")))return SKIP("Performa voucher Shopee","Nilai voucher yang ditanggung penjual sudah tercatat per pesanan di file penghasilan, jadi tidak dipakai supaya tidak dobel.");
-    if(hdr.has("Tipe Promosi"))return SKIP("Performa diskon Shopee","Diskon penjual sudah tercermin di harga per pesanan (file pesanan).");
-    if(wb.SheetNames.includes("Tren Metrik"))return SKIP("Flash sale toko Shopee","Penjualan flash sale sudah termasuk di file pesanan.");
+    if(hdr.has("Rata-rata Waktu Dihabiskan"))return parseShopeeExtra("shopeetraffic",wb,file.name);
+    if(hdr.has("Penjualan per Pembeli (Pesanan Dibuat)")||(hdr.has("Total Pengunjung (Kunjungan)")&&hdr.has("Total Pembeli (Pesanan Dibuat)")))return parseShopeeExtra("shopeesalesov",wb,file.name);
+    if(first.some(r=>r.some(c=>clean(c)==="Kategori Shopee")))return parseShopeeExtra("shopeecomp",wb,file.name);
+    if(hdr.has("Rasio Penjualan")&&hdr.has("Kode Produk"))return parseShopeeExtra("shopeecard",wb,file.name);
+    if(wb.SheetNames.includes("Rincian Performa")&&wb.SheetNames.includes("Grafik Kriteria"))return parseShopeeExtra("shopeevoucher",wb,file.name);
+    if(hdr.has("Tipe Promosi")||wb.SheetNames.includes("Tren Metrik"))return parseGeneric(wb,file.name,SP);
     /* ---- TikTok ---- */
     if(wb.SheetNames.some(sn=>sheetRows(wb.Sheets[sn]).some(r=>r.some(c=>clean(c)==="Jumlah penyelesaian pembayaran"))))return parseIncome(wb,file.name);
     const t=k=>table(first,k);
@@ -1109,7 +1150,7 @@ async function analyze(file){
     if(hdr.has("ID postingan"))return parseAds(hdr.has("Nama produk")?"creativeprod":"creative",t("ID postingan"),file.name);
     if(hdr.has("Nama produk")&&hdr.has("Nama kampanye"))return parseAds("product",t("Nama produk"),file.name);
     if(hdr.has("Nama produk")&&hdr.has("ID produk"))return{kind:"skip",name:file.name,label:"Data produk satu kampanye",why:"Sudah tercakup di file Product data (semua kampanye)."};
-    return{kind:"skip",name:file.name,label:"Tidak dikenali",why:"Format file ini belum didukung."};
+    return parseGeneric(wb,file.name,/shopee|product_diagnostics|productoverview/i.test(file.name)?SP:TT);
   }catch(e){return{kind:"skip",name:file.name,label:"Gagal dibaca",why:String(e.message||e)};}
 }
 
@@ -1142,6 +1183,7 @@ function impHtml(busy){
     }else if(x.kind==="report"&&x.rkind==="shopeesource"){d=`<div>${fdate(x.from)} – ${fdate(x.to)} · penjualan ${rp(x.summary.sales)}, ${num(x.summary.visitors)} pengunjung. Dipakai untuk analitik sumber penjualan saja.</div>`;
     }else if(x.kind==="report"&&x.rkind==="shopeeads"){const sp=x.rows.reduce((a,r)=>a+r.spend,0),g=x.rows.reduce((a,r)=>a+r.gmv,0);d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${num(x.rows.length)} kampanye · biaya ${rp(sp)} · omzet dari iklan ${rp(g)}.</div><div class="hint">Biaya ini menjadi biaya Iklan Shopee di laba rugi (dibagi rata per hari periode). Top-up saldo iklan diperlakukan sebagai uang muka di rekening Saldo Iklan Shopee, jadi tidak dobel.</div>`;
     }else if(x.kind==="report"&&x.rkind==="shopeeaff"){d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${num(x.rows.length)} pesanan affiliate. Untuk analitik saja: komisi yang benar-benar dipotong sudah tercatat dari file penghasilan (Biaya Komisi AMS).</div>`;
+    }else if(x.kind==="report"&&x.analytics){d=`<div>${fdate(x.from)} – ${fdate(x.to)}${x.rows.length?` · ${num(x.rows.length)} baris`:""}.</div><div class="hint">Untuk analitik saja (tab Iklan & Analitik), tidak masuk laba rugi, stok, atau saldo, jadi tidak ada yang terhitung dua kali.</div>`;
     }else if(x.kind==="report"){d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${num(x.rows.length)} baris${x.summary?.total?` (dari ${num(x.summary.total)} materi, disimpan yang ada biaya atau penjualannya, maks. 200)`:""}.</div>`;}
     else if(x.kind==="adsdaily"){d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${num(x.days.length)} hari, biaya ${rp(x.days.reduce((a,v)=>a+v.spend,0))}.</div>`;}
     else d=`<div class="hint">${esc(x.why)}</div>`;
@@ -1204,11 +1246,12 @@ function mergeReports(kind,start,end,ch){
   const rs=S.adsreports.filter(r=>r.kind===kind&&(r.ch||TT)===ch&&r.from<=end&&r.to>=start).sort((a,b)=>(mdays(b.from,b.to)-mdays(a.from,a.to))||b.to.localeCompare(a.to)),use=[];
   for(const r of rs)if(!use.some(u=>u.from<=r.from&&u.to>=r.to))use.push(r);
   if(!use.length)return null;if(use.length===1)return use[0];
-  const key={product:x=>x.camp+"|"+x.prod,livecampaign:x=>x.camp,prodcampaign:x=>x.camp,live:x=>x.id,creative:x=>x.id||x.title,creativeprod:x=>x.id||x.title,cardtraffic:x=>x.date,livedaily:x=>x.date}[kind]||(x=>JSON.stringify(x));
-  const SUM=["spend","orders","gmv","views","impr","clicks","cart","buyers","viewers","sessions","withGmv","watch"],by=new Map();
-  for(const r of use)for(const x of r.rows||[]){const k=key(x),y=by.get(k);if(!y){by.set(k,{...x});continue;}if(kind==="cardtraffic"||kind==="livedaily")continue;for(const f of SUM)if(f in x)y[f]=(+y[f]||0)+(+x[f]||0);}
-  const rows=[...by.values()].sort((a,b)=>kind==="cardtraffic"||kind==="livedaily"?a.date.localeCompare(b.date):(b.spend||0)-(a.spend||0));
-  const summary={};for(const r of use)for(const [k,v] of Object.entries(r.summary||{}))if(typeof v==="number")summary[k]=(summary[k]||0)+v;
+  const key={product:x=>x.camp+"|"+x.prod,livecampaign:x=>x.camp,prodcampaign:x=>x.camp,live:x=>x.id,creative:x=>x.id||x.title,creativeprod:x=>x.id||x.title,cardtraffic:x=>x.date,livedaily:x=>x.date,shopeetraffic:x=>x.date,shopeesalesov:x=>x.date,shopeevoucher:x=>x.date,shopeesku:x=>x.code,shopeecard:x=>x.code}[kind]||(x=>JSON.stringify(x));
+  const SUM=["spend","orders","gmv","views","impr","clicks","cart","buyers","viewers","sessions","withGmv","watch","sales","visitors","cartUsers","likes","search"],by=new Map();
+  for(const r of use)for(const x of r.rows||[]){const k=key(x),y=by.get(k);if(!y){by.set(k,{...x});continue;}if(/^(cardtraffic|livedaily|shopeetraffic|shopeesalesov|shopeevoucher)$/.test(kind))continue;for(const f of SUM)if(f in x)y[f]=(+y[f]||0)+(+x[f]||0);}
+  const rows=[...by.values()].sort((a,b)=>/^(cardtraffic|livedaily|shopeetraffic|shopeesalesov|shopeevoucher)$/.test(kind)?a.date.localeCompare(b.date):((b.spend||b.sales||0)-(a.spend||a.sales||0)));
+  const summary={};for(const r of use)for(const [k,v] of Object.entries(r.summary||{})){if(typeof v==="number")summary[k]=(summary[k]||0)+v;
+    else if(Array.isArray(v)){const m=new Map((summary[k]||[]).map(o=>[o.code+"|"+(o.name||o.variant||o.range||o.type),o]));for(const o of v){const kk=o.code+"|"+(o.name||o.variant||o.range||o.type),y=m.get(kk);if(!y){m.set(kk,{...o});continue;}for(const [f,x] of Object.entries(o))if(typeof x==="number")y[f]=(+y[f]||0)+x;}summary[k]=[...m.values()];}}
   return{...use[0],rows,summary,from:use.map(r=>r.from).sort()[0],to:use.map(r=>r.to).sort().slice(-1)[0],parts:use.length};
 }
 /* line chart for values that can go below zero (profit) or ratios (ROAS, ACOS); same hover tooltip as the column chart */
@@ -1287,6 +1330,57 @@ V.adsAll=()=>{
     <div><span><b>CTR · CPC · CVR</b></span><span>klik ÷ tayangan · biaya per klik · konversi ÷ klik</span></div>
   </div><p class="hint">Biaya iklan TikTok dari data iklan harian; Shopee dari laporan iklan per kampanye (dibagi rata per hari periodenya), ditambah beban iklan yang diinput manual. Top-up saldo iklan tidak dihitung lagi karena itu uang muka.</p></div>`;
 };
+/* Shopee analytics-only files: visitors, vouchers, buyer mix, product performance. Shopee's own numbers (orders created), never used in the P&L */
+function shopeeExtraHtml(start,end,omzet){
+  const pc=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%",dl=d=>new Date(d+"T00:00").toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long"});
+  const tr=mergeReports("shopeetraffic",start,end,SP),so=mergeReports("shopeesalesov",start,end,SP),vo=mergeReports("shopeevoucher",start,end,SP),sk=mergeReports("shopeesku",start,end,SP),cd=mergeReports("shopeecard",start,end,SP);
+  const comp=S.adsreports.filter(r=>r.kind==="shopeecomp"&&r.from<=end&&r.to>=start).sort((a,b)=>b.to.localeCompare(a.to)||mdays(b.from,b.to)-mdays(a.from,a.to))[0];
+  const note=r=>r?`<span class="hint">Data ${fdate(r.from)} – ${fdate(r.to)}</span>`:"";let h="";
+  const td=(tr?.rows||[]).filter(x=>x.date>=start&&x.date<=end),sd=new Map((so?.rows||[]).map(x=>[x.date,x]));
+  if(td.length){const t=k=>td.reduce((a,x)=>a+(+x[k]||0),0),V=t("visitors"),sv=[...sd.values()].filter(x=>x.date>=start&&x.date<=end),vis=sv.reduce((a,x)=>a+x.visits,0),buy=sv.reduce((a,x)=>a+x.buyers,0);
+    const avgT=V?td.reduce((a,x)=>a+x.avgTime*x.visitors,0)/V:0,bnc=V?td.reduce((a,x)=>a+x.bounce*x.visitors,0)/V:0;
+    h+=`<div class="panel"><div class="row"><h3>Pengunjung toko Shopee per hari</h3><div class="sp"></div>${note(tr)}</div>
+    <div class="kpis"><div class="kpi"><span>Pengunjung</span><b>${num(V)}</b><span>${pc(t("newv")/V)} pengunjung baru · ${num(t("followers"))} pengikut baru</span></div>
+      <div class="kpi"><span>Produk dilihat</span><b>${num(t("views"))}</b><span>${f2(V?t("views")/V:0)} produk per pengunjung</span></div>
+      <div class="kpi"><span>Waktu di toko</span><b>${Math.floor(avgT/60)}m ${String(Math.round(avgT%60)).padStart(2,"0")}d</b><span>${pc(bnc)} melihat tanpa membeli</span></div>
+      ${vis?`<div class="kpi"><span>Konversi kunjungan → pembeli</span><b>${pc(buy/vis)}</b><span>${num(buy)} pembeli dari ${num(vis)} kunjungan</span></div>`:""}</div>
+    ${colChart({label:"Pengunjung baru dan lama Shopee per hari",series:[{name:"Pengunjung baru",color:"var(--sp)"},{name:"Pengunjung lama",color:"var(--s2)"}],cols:td.map(x=>{const s0=sd.get(x.date);return{x:String(+x.date.slice(8,10)),v:[x.newv,x.oldv],tip:[dl(x.date),`Total pengunjung ${num(x.visitors)}`,`[sp]Baru ${num(x.newv)}`,`[s2]Lama ${num(x.oldv)}`,`Produk dilihat ${num(x.views)} · waktu rata-rata ${Math.floor(x.avgTime/60)}m ${x.avgTime%60}d`,`Melihat tanpa membeli ${pc(x.bounce)}`,s0?`Pembeli ${num(s0.buyers)} · konversi ${pc(s0.visits?s0.buyers/s0.visits:null)} · penjualan ${rp(s0.sales)}`:"",x.followers?`Pengikut baru ${num(x.followers)}`:""].filter(Boolean).join("\n")};})},{yfmt:x=>num(x)})}
+    <p class="hint">Dari file traffic overview${so?" dan sales overview":""}. "Melihat tanpa membeli" tinggi berarti halaman produk belum meyakinkan (foto, harga, ulasan). Angka penjualan di sini versi statistik Shopee (pesanan dibuat), hanya untuk analisis.</p></div>`;}
+  if(vo){const vd=vo.rows.filter(x=>x.date>=start&&x.date<=end),t=k=>vd.reduce((a,x)=>a+(+x[k]||0),0),C=t("claims"),O=t("orders"),Sa=t("sales"),sel=t("seller"),sho=t("shopee");
+    const vlist=vo.summary?.vouchers||[];
+    h+=`<div class="panel"><div class="row"><h3>Voucher Shopee</h3><div class="sp"></div>${note(vo)}</div>
+    <div class="kpis"><div class="kpi"><span>Voucher diklaim</span><b>${num(C)}</b><span>${num(O)} dipakai di pesanan · tingkat pemakaian ${pc(C?O/C:null)}</span></div>
+      <div class="kpi"><span>Penjualan dengan voucher</span><b>${rp(Sa)}</b><span>${omzet?`${pc(Sa/omzet)} dari omzet Shopee bulan ini`:""}</span></div>
+      <div class="kpi"><span>Biaya voucher</span><b>${rp(sel+sho)}</b><span>Ditanggung penjual ${rp(sel)} · Shopee ${rp(sho)}</span></div>
+      <div class="kpi"><span>Penjualan per Rp1 voucher penjual</span><b>${sel?f2(Sa/sel):"–"}</b><span>Penjualan ÷ biaya yang ditanggung penjual</span></div></div>
+    ${vd.length?colChart({label:"Voucher diklaim dan dipakai per hari",series:[{name:"Diklaim",color:"var(--sp)"},{name:"Dipakai di pesanan",color:"var(--s1)"}],cols:vd.map(x=>({x:String(+x.date.slice(8,10)),v:[x.claims,x.orders],tip:[dl(x.date),`[sp]Diklaim ${num(x.claims)}`,`[s1]Dipakai ${num(x.orders)} pesanan (${pc(x.claims?x.orders/x.claims:null)})`,`Penjualan ${rp(x.sales)}`,`Biaya: penjual ${rp(x.seller)} · Shopee ${rp(x.shopee)}`].join("\n")}))},{yfmt:x=>num(x)}):""}
+    ${vlist.length?`<div class="tbl"><table><thead><tr><th>Voucher</th><th>Kode</th><th>Status</th><th>Dibuat oleh</th><th class="n">Diklaim</th><th class="n">Dipakai</th><th class="n">Pemakaian</th><th class="n">Penjualan</th><th class="n">Biaya penjual</th><th class="n">Biaya Shopee</th><th class="n">Penjualan / biaya penjual</th></tr></thead><tbody>
+      ${[...vlist].sort((a,b)=>b.claims-a.claims).map(v=>`<tr><td class="wrapcell">${esc(v.name)}<div class="hint">${esc(v.period||"")}</div></td><td>${esc(v.code)}</td><td>${esc(v.status)}</td><td>${esc((v.by||"").replace("Dibuat oleh ",""))}</td><td class="n">${num(v.claims)}</td><td class="n">${num(v.orders)}</td><td class="n">${pc(v.claims?v.orders/v.claims:null)}</td><td class="n">${rp(v.sales)}</td><td class="n mut">${rp(v.seller)}</td><td class="n mut">${rp(v.shopee)}</td><td class="n">${v.seller?f2(v.sales/v.seller):"–"}</td></tr>`).join("")}</tbody></table></div>`:""}
+    <p class="hint">Dari file voucher, untuk analitik saja. Biaya voucher yang benar-benar dipotong sudah masuk laba rugi lewat file penghasilan (Voucher disponsori penjual), jadi tidak dihitung lagi. Voucher yang banyak diklaim tapi jarang dipakai = menarik, tapi syaratnya (min. belanja) mungkin terlalu tinggi.</p></div>`;}
+  if(comp){const pr=comp.summary?.price||[],ty=comp.summary?.type||[],B=pr.reduce((a,x)=>a+x.buyers,0);
+    h+=`<div class="grid2"><div class="panel"><div class="row"><h3>Pembeli per rentang harga</h3><div class="sp"></div>${note(comp)}</div>
+      <div class="tbl"><table><thead><tr><th>Rentang harga pesanan</th><th class="n">Pembeli</th><th class="n">Porsi</th><th class="n">Penjualan</th><th class="n">Konversi</th></tr></thead><tbody>${pr.map(x=>`<tr><td>Rp${esc(x.range.replace("~"," – ").replace("∞","ke atas"))}</td><td class="n">${num(x.buyers)}</td><td class="n">${pc(B?x.buyers/B:null)}</td><td class="n">${rp(x.sales)}</td><td class="n">${pc(x.conv)}</td></tr>`).join("")}</tbody></table></div></div>
+      <div class="panel"><div class="row"><h3>Pembeli baru vs lama</h3><div class="sp"></div>${note(comp)}</div>
+      <div class="tbl"><table><thead><tr><th>Tipe pembeli</th><th class="n">Pembeli</th><th class="n">Penjualan</th><th class="n">Konversi</th></tr></thead><tbody>${ty.map(x=>`<tr><td>${esc(x.type)}</td><td class="n">${num(x.buyers)}</td><td class="n">${rp(x.sales)}</td><td class="n">${pc(x.conv)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="hint">Dari file sales composition. Porsi pembeli lama yang kecil berarti toko masih bergantung pada pembeli baru; voucher pengikut atau follow-up bisa menaikkan pembelian ulang.</p></div></div>`;}
+  const pp=sk||cd;
+  if(pp){const rows=pp.rows,isSku=!!sk;
+    h+=`<div class="panel"><div class="row"><h3>Performa produk Shopee</h3><div class="sp"></div>${note(pp)}</div>
+    <div class="tbl"><table><thead><tr><th>Produk</th><th class="n">Dilihat</th><th class="n">Diklik</th><th class="n">CTR</th>${isSku?`<th class="n">Pengunjung</th><th class="n">Masuk keranjang</th>`:""}<th class="n">Pesanan</th><th class="n">Konversi</th><th class="n">Penjualan</th>${isSku?`<th class="n">Pesanan berulang</th>`:""}</tr></thead><tbody>
+    ${rows.slice(0,20).map(x=>`<tr><td class="wrapcell" title="${esc(x.name)}">${esc(((/^isi\s*\d+/i.exec(x.name)||[])[0]||(/85\s*gr/i.test(x.name)?"Kiso 85gr (produk utama)":x.name.slice(0,40))).replace(/^isi/i,"Isi"))}</td><td class="n">${num(x.views)}</td><td class="n">${num(x.clicks)}</td><td class="n">${pc(x.views?x.clicks/x.views:null)}</td>${isSku?`<td class="n">${num(x.visitors)}</td><td class="n">${num(x.cartUsers)}</td>`:""}<td class="n">${num(x.orders)}</td><td class="n">${pc(isSku?(x.visitors?x.buyers/x.visitors:null):(x.clicks?x.orders/x.clicks:null))}</td><td class="n">${rp(x.sales)}</td>${isSku?`<td class="n">${pc(x.repeat)}</td>`:""}</tr>`).join("")}</tbody></table></div>
+    ${isSku&&(sk.summary?.vars||[]).length?`<div class="hint" style="margin-top:6px">Penjualan per variasi: ${sk.summary.vars.filter(v=>v.sales).sort((a,b)=>b.sales-a.sales).map(v=>`${esc(v.variant)} ${rp(v.sales)}`).join(" · ")}</div>`:""}
+    <p class="hint">Dari file ${isSku?"parentskudetail":"product card traffic"}, versi statistik Shopee. CTR = klik ÷ dilihat; konversi = pembeli ÷ pengunjung produk. Produk dengan CTR rendah perlu foto utama/judul yang lebih menarik; konversi rendah perlu harga, ulasan, atau deskripsi yang lebih meyakinkan.</p></div>`;}
+  return h;
+}
+/* files kept as-is (e.g. product_diagnostics): shown as a plain table, never used in calculations */
+function genericHtml(ch,start,end){
+  const rs=S.adsreports.filter(r=>/^generic-/.test(r.kind)&&(r.ch||TT)===ch&&r.from<=end&&r.to>=start).sort((a,b)=>b.to.localeCompare(a.to));
+  const seen=new Set(),latest=rs.filter(r=>!seen.has(r.kind)&&seen.add(r.kind));
+  if(!latest.length)return"";
+  return`<div class="panel"><h3>Data lain dari file marketplace</h3><p class="hint" style="margin:0">File yang belum punya tampilan khusus disimpan apa adanya di sini untuk dibaca (tidak dipakai dalam perhitungan). Klik nama file untuk membuka.</p>
+  ${latest.map(r=>`<details style="margin-top:8px"><summary><b>${esc((r.file||r.kind.replace(/^generic-/,"")).replace(/\.(xlsx|xls|csv)$/i,""))}</b> <span class="hint">${fdate(r.from)}${r.to!==r.from?" – "+fdate(r.to):""}</span></summary>
+    ${(r.summary?.sheets||[]).map(sh=>`<div class="hint" style="margin:6px 0 2px">Sheet: ${esc(sh.sheet)}${sh.more?` · ${num(sh.more)} baris lain tidak ditampilkan`:""}</div><div class="tbl"><table><thead><tr>${sh.head.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${sh.body.map(r=>`<tr>${sh.head.map((_,j)=>`<td class="wrapcell">${esc(r[j]||"")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`).join("")}</details>`).join("")}</div>`;
+}
 V.adsShopee=()=>{
   const m=M(),start=m+"-01",end=endOf(m),T0=today();
   const rep=k=>S.adsreports.filter(r=>r.kind===k&&r.from<=end&&r.to>=start).sort((a,b)=>b.to.localeCompare(a.to))[0];
@@ -1299,7 +1393,7 @@ V.adsShopee=()=>{
   const aT=k=>camps.reduce((a,x)=>a+(+x[k]||0),0),aSp=aT("spend"),aG=aT("gmv"),aC=aT("clicks"),aV=aT("views"),aCv=aT("conv");
   const top=S.settles.filter(d=>d.ch===SP&&inMonth(d)).reduce((a,d)=>a+(d.rows||[]).reduce((x,r)=>x+(+r.a||0),0),0),man=S.cash.filter(c=>inMonth(c)&&c.type==="keluar"&&c.category==="Iklan Shopee").reduce((a,c)=>a+(+c.amount||0),0);
   const imp=S.canWrite?`<button class="btn" data-import>Impor file marketplace</button>`:"";
-  if(!os.length&&!days.length&&!src&&!af)return`<div class="row"><h2>Analitik Shopee ${esc(mname(m))}</h2><div class="sp"></div>${imp}</div>${emptyBox(`Belum ada data Shopee untuk ${esc(mname(m))}`,"Impor file Order.all, Income (dana dilepas), productoverview, shop-stats, dan SellerConversionReport dari Seller Centre Shopee.")}`;
+  if(!os.length&&!days.length&&!src&&!af&&!S.adsreports.some(r=>r.ch===SP&&r.from<=end&&r.to>=start))return`<div class="row"><h2>Analitik Shopee ${esc(mname(m))}</h2><div class="sp"></div>${imp}</div>${emptyBox(`Belum ada data Shopee untuk ${esc(mname(m))}`,"Impor file Order.all, Income (dana dilepas), productoverview, shop-stats, dan SellerConversionReport dari Seller Centre Shopee.")}`;
   const chart=days.length?colChart({label:"Pengunjung produk Shopee per hari",series:[{name:"Pengunjung produk",color:"var(--s1)"}],
     cols:days.map(d=>({x:String(+d.date.slice(8,10)),v:[d.visitors],tip:[new Date(d.date+"T00:00").toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long"}),`Pengunjung produk ${num(d.visitors)}`,`Menambah ke keranjang ${num(d.cart)}`,`Pembeli ${num(d.buyers)} · konversi ${pct(d.buyers,d.visitors)}`,`Penjualan ${rp(d.sales)}`].join("\n")}))},{yfmt:x=>num(x)}):"";
   const steps=[["Pengunjung produk",V0],["Menambah ke keranjang",C0],["Pembeli",B0]];
@@ -1335,9 +1429,11 @@ V.adsShopee=()=>{
       <div class="tbl"><table><thead><tr><th>Sumber</th><th class="n">Penjualan</th><th class="n">Porsi</th></tr></thead><tbody>${srcRows.map(([k,v])=>`<tr><td>${k}</td><td class="n">${rp(v)}</td><td class="n">${pct(v,sm.sales)}</td></tr>`).join("")}</tbody><tfoot><tr><td>Total (versi statistik Shopee)</td><td class="n">${rp(sm.sales)}</td><td></td></tr></tfoot></table></div>
       <p class="hint">${num(sm.visitors)} pengunjung toko, ${num(sm.orders)} pesanan, ${num(sm.cancel)} batal. Shopee juga mencatat ${rp(sm.ads)} penjualan "dari Iklan Shopee", tapi angka itu tumpang tindih dengan sumber di atas sehingga tidak dijumlahkan. Total versi statistik Shopee bisa sedikit berbeda dari omzet aplikasi karena Shopee menghitung harga sebelum sebagian potongan.</p></div>`:""}
   </div>
+  ${shopeeExtraHtml(start,end,g)}
   ${affTop.length?`<div class="panel"><div class="row"><h3>Top affiliate Shopee</h3><div class="sp"></div><span class="hint">Pesanan ${fdate(start)} – ${fdate(end)}</span></div>
     <div class="tbl"><table><thead><tr><th>Affiliate</th><th class="n">Pesanan</th><th class="n">Nilai pembelian</th><th class="n">Estimasi komisi</th></tr></thead><tbody>${affTop.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${num(v.n)}</td><td class="n">${rp(v.v)}</td><td class="n mut">${rp(v.c)}</td></tr>`).join("")}</tbody></table></div>
-    <p class="hint">Dari SellerConversionReport, untuk analisis saja. Komisi affiliate yang benar-benar dipotong masuk laba rugi dari file penghasilan (Biaya Komisi AMS), jadi tidak dihitung dua kali.</p></div>`:""}`;
+    <p class="hint">Dari SellerConversionReport, untuk analisis saja. Komisi affiliate yang benar-benar dipotong masuk laba rugi dari file penghasilan (Biaya Komisi AMS), jadi tidak dihitung dua kali.</p></div>`:""}
+  ${genericHtml(SP,start,end)}`;
 };
 V.adsTT=()=>{
   const m=M(),start=m+"-01",end=endOf(m),pm=pmap();
