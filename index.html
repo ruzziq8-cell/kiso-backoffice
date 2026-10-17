@@ -646,6 +646,7 @@ V.dash=()=>{
   const top=Object.entries(pl.perProd).sort((a,b)=>b[1].qty-a[1].qty);
   const noHpp=S.products.filter(p=>p.active!==false&&!(+p.hpp)).length;
   const end=endOf(M()),bal=balances(end),R=receivables(end);
+  const sold={all:0,ch:{},other:0};for(const o of ORD())if(counts(o)&&inMonth(o))for(const it of o.items||[]){const n=(+it.qty||0)*(+pm[it.productId]?.pcs||0);sold.all+=n;if(MP.includes(o.channel))sold.ch[o.channel]=(sold.ch[o.channel]||0)+n;else sold.other+=n;}
   return`${noHpp?`<div class="banner">${noHpp} produk belum punya HPP. Isi di modul Harga & Margin supaya laba dan margin akurat.</div>`:""}
   <h2>Ringkasan ${esc(mname(M()))}</h2>
   <div class="kpis">
@@ -658,6 +659,7 @@ V.dash=()=>{
     <div class="acct recv hero"><span>Total sabun batang</span><b>${num(s.soap)} pcs</b><span>Karton, piece & pack</span></div>
     ${sortAcc().map(a=>`<div class="acct recv"><span>${esc(a.name)}</span><b class="${(bal[a.id]||0)<0?"neg":""}">${rp(bal[a.id])}</b><span>Saldo akhir ${mshort(M())}</span></div>`).join("")}
     ${MP.map(ch=>`<div class="acct recv"><span>Piutang ${ch}</span><b>${rp(recvTotal(R,ch))}</b><span>Belum dicairkan</span></div>`).join("")}
+    <div class="acct recv" title="Jumlah sabun batang dari pesanan ${esc(mname(M()))} yang dihitung ke omzet (tanpa batal, belum dibayar, dan sampel). Isi 3 = 3 sabun, dst."><span>Total sabun terjual</span><b>${num(sold.all)} pcs</b><span>${[[TT,"TikTok"],[SP,"Shopee"]].map(([k,l])=>`${l} ${num(sold.ch[k]||0)}`).join(" · ")}${sold.other?` · Lain ${num(sold.other)}`:""}</span></div>
   </div>
   <div class="grid2">
     <div class="panel" style="align-content:start"><div><h3>Omzet kotor per hari per channel (Rp)</h3><p class="hint" style="margin:4px 0 0">Batang hijau = TikTok Shop, oranye = Shopee, tanpa pesanan batal. Arahkan kursor atau ketuk batang untuk rinciannya. Rata-rata ${rp(avgDay)} per hari berjualan.</p></div>
