@@ -301,35 +301,36 @@ const ORD=()=>derive().all;
 /* ---------- stock ---------- */
 function stockOf(asOf){
   const ok=r=>!asOf||(r.date||"")<=asOf;
-  const P={},Mt={},lastCost={};
+  const P={},Mt={},lastCost={},auto=[];
   for(const p of S.products)P[p.id]=p.stocked?(+p.stockStart||0):0;
   for(const m of S.materials)Mt[m.id]=+m.stockStart||0;
   const K=roleId("karton"),PC=roleId("piece"),ML=roleId("mailer");
   const perK=+byId("materials",K)?.perUnit||180;
   const add=(id,q)=>{if(id)Mt[id]=(Mt[id]||0)+q;};
-  for(const b of [...S.purchases].sort((a,b)=>(a.date||"").localeCompare(b.date||"")))if(b.status==="diterima"&&ok(b))for(const it of b.items||[]){add(it.materialId,+it.qty||0);lastCost[it.materialId]=+it.cost||0;}
-  for(const x of S.production)if(ok(x)){
-    const q=+x.qty||0;
+  const usePieces=q=>add(PC,-q);
+  const outItem=(it,date)=>{const p=byId("products",it.productId),q=+it.qty||0;if(p?.stocked)P[p.id]=(P[p.id]||0)-q;else usePieces(q*(+p?.pcs||0));};
+  /* events in date order; on the same day inflows come before outflows */
+  const ev=[];
+  for(const b of S.purchases)if(b.status==="diterima"&&ok(b))ev.push([b.date,0,b.created||0,()=>{for(const it of b.items||[]){add(it.materialId,+it.qty||0);lastCost[it.materialId]=+it.cost||0;}}]);
+  for(const r of S.returns)if(ok(r)&&r.cond==="baik")ev.push([r.date,0,r.created||0,()=>{const p=byId("products",r.productId),q=+r.qty||0;if(!p)return;
+    if(p.stocked&&r.as==="pack")P[p.id]=(P[p.id]||0)+q;else add(PC,q*(+p.pcs||0));}]);
+  for(const x of S.production)if(ok(x))ev.push([x.date,x.type==="buka"?1:2,x.created||0,()=>{const q=+x.qty||0;
     if(x.type==="buka"){add(K,-q);add(PC,q*(+x.perUnit||perK));}
-    else{const p=byId("products",x.productId);P[x.productId]=(P[x.productId]||0)+q;add(PC,-q*(+p?.pcs||0));add(ML,-q);}
-  }
-  for(const o of ORD())if(leftStock(o)&&ok(o))for(const it of o.items||[]){
-    const p=byId("products",it.productId),q=+it.qty||0;
-    if(p?.stocked)P[p.id]=(P[p.id]||0)-q;else add(PC,-q*(+p?.pcs||0));
-  }
-  for(const m of S.moves)if(ok(m)){
-    if(m.type==="kirim"){for(const it of m.items||[]){const p=byId("products",it.productId),q=+it.qty||0;if(p?.stocked)P[p.id]=(P[p.id]||0)-q;else add(PC,-q*(+p?.pcs||0));}continue;}
+    else{const p=byId("products",x.productId);P[x.productId]=(P[x.productId]||0)+q;add(ML,-q);usePieces(q*(+p?.pcs||0));}}]);
+  for(const m of S.moves)if(ok(m))ev.push([m.date,m.type==="masuk"||(m.type==="opname"&&+m.qty>0)?0:3,m.created||0,()=>{
+    if(m.type==="kirim"){for(const it of m.items||[])outItem(it,m.date);return;}
     const q=+m.qty||0,d=m.type==="keluar"?-q:q,[t,id]=(m.target||"").split(":");
-    if(t==="p")P[id]=(P[id]||0)+d;else if(t==="m")add(id,d);
-  }
-  /* customer returns: good items go back as a ready pack (isi 1–4) or as loose pieces; damaged items are only recorded */
-  for(const r of S.returns)if(ok(r)&&r.cond==="baik"){const p=byId("products",r.productId),q=+r.qty||0;if(!p)continue;
-    if(p.stocked&&r.as==="pack")P[p.id]=(P[p.id]||0)+q;else add(PC,q*(+p.pcs||0));}
+    if(t==="p")P[id]=(P[id]||0)+d;else if(t==="m"){add(id,d);}}]);
+  for(const o of ORD())if(leftStock(o)&&ok(o))ev.push([o.date,3,0,()=>{for(const it of o.items||[])outItem(it,o.date);}]);
   /* returns to supplier leave the warehouse */
-  for(const r of S.supreturns)if(ok(r))for(const it of r.items||[])add(it.materialId,-(+it.qty||0));
+  for(const r of S.supreturns)if(ok(r))ev.push([r.date,3,r.created||0,()=>{for(const it of r.items||[])add(it.materialId,-(+it.qty||0));}]);
+  let short="";
+  ev.sort((a,b)=>(a[0]||"").localeCompare(b[0]||"")||a[1]-b[1]||a[2]-b[2]).forEach(e=>{const was=PC?(Mt[PC]||0):0;e[3]();if(PC&&was>=0&&(Mt[PC]||0)<0)short=e[0];});
+  /* loose soap ran short and no carton opening was recorded to cover it: cartons are opened automatically (1 karton = perK pieces) */
+  if(PC&&K&&(Mt[PC]||0)<0&&(Mt[K]||0)>0){const n=Math.min(Mt[K],Math.ceil(-Mt[PC]/perK));add(K,-n);add(PC,n*perK);auto.push({date:short,n});}
   const packs=S.products.filter(p=>p.stocked).reduce((a,p)=>a+(P[p.id]||0)*(+p.pcs||0),0);
   const soap=(K?(Mt[K]||0)*perK:0)+(PC?(Mt[PC]||0):0)+packs;
-  return{P,Mt,lastCost,K,PC,ML,perK,packs,soap};
+  return{P,Mt,lastCost,K,PC,ML,perK,packs,soap,auto};
 }
 function unitCost(m,s){
   if(s.lastCost[m.id]!=null)return s.lastCost[m.id];
@@ -760,9 +761,11 @@ V.stock=()=>{
     <td class="n">${p.stocked?`<b class="${q<=0?"neg":""}">${num(q)}</b> pack`:'<span class="neg" style="font-size:13px">tidak di-stock</span>'}</td><td>${st}</td>
     <td class="note">Per 1 terjual: ${effect}</td></tr>`;};
   const mats=sortBy("materials").filter(m=>!NOSTOCK(m));
-  const mnote={karton:`1 karton = ${num(s.perK)} sabun. Bertambah dari pembelian, berkurang saat Buka karton.`,piece:"Bertambah saat Buka karton. Berkurang saat packing isi 1–4 dan saat isi 5–15 terjual.",mailer:"Berkurang 1 untuk setiap pack isi 1–4 yang di-packing.",lain:"Diubah lewat pembelian dan penyesuaian."};
-  const history=[...S.production.filter(inMonth).map(x=>({...x,_k:"prod"})),...S.moves.filter(inMonth).map(x=>({...x,_k:"move"})),...S.returns.filter(inMonth).map(x=>({...x,_k:"cret"})),...S.supreturns.filter(inMonth).map(x=>({...x,_k:"sret"}))].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.created||0)-(a.created||0));
+  const mnote={karton:`1 karton = ${num(s.perK)} sabun. Bertambah dari pembelian. Berkurang otomatis saat piece lepas habis, atau lewat Buka karton manual.`,piece:`Berkurang saat packing isi 1–4 dan saat isi 5–15 / satuan keluar. Kalau habis, karton otomatis dibuka (1 karton = ${num(s.perK)} piece).`,mailer:"Berkurang 1 untuk setiap pack isi 1–4 yang di-packing.",lain:"Diubah lewat pembelian dan penyesuaian."};
+  const autoByDay={};for(const a of s.auto)autoByDay[a.date]=(autoByDay[a.date]||0)+a.n;
+  const history=[...Object.entries(autoByDay).map(([date,n])=>({date,n,_k:"auto"})).filter(inMonth),...S.production.filter(inMonth).map(x=>({...x,_k:"prod"})),...S.moves.filter(inMonth).map(x=>({...x,_k:"move"})),...S.returns.filter(inMonth).map(x=>({...x,_k:"cret"})),...S.supreturns.filter(inMonth).map(x=>({...x,_k:"sret"}))].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.created||0)-(a.created||0));
   const hdesc=x=>{
+    if(x._k==="auto")return[`Buka karton otomatis`,`${num(x.n)} karton → +${num(x.n*s.perK)} piece sabun (piece lepas habis)`];
     if(x._k==="cret"){const p=pm[x.productId],q=+x.qty||0;return[`Retur dari pembeli · ${esc(x.channel||"")}${x.ref?" "+esc(x.ref):""}`,x.cond!=="baik"?`${esc(pname(x.productId,pm))} ×${num(q)} · rusak, stok tidak bertambah`:(p?.stocked&&x.as==="pack"?`+${num(q)} pack ${esc(p.name)}`:`+${num(q*(+p?.pcs||0))} piece sabun (${esc(pname(x.productId,pm))} ×${num(q)} dibongkar)`)];}
     if(x._k==="sret")return[`Retur ke supplier · ${esc(x.supplier||"")}`,(x.items||[]).map(it=>`${esc(matName(it.materialId))} −${num(+it.qty)}`).join(", ")];
     if(x._k==="prod"){if(x.type==="buka")return[`Buka karton`,`${num(x.qty)} karton → +${num(x.qty*(+x.perUnit||s.perK))} piece sabun`];
@@ -781,7 +784,7 @@ V.stock=()=>{
     <div class="acct recv"><span>Dalam pack isi 1–4</span><b>${num(s.packs)} pcs</b><span>${S.products.filter(p=>p.stocked).map(p=>`${num(s.P[p.id]||0)}×isi ${num(p.pcs)}`).join(" · ")}</span></div>
     <div class="acct recv"><span>Bubble mailer</span><b class="${mQty<0?"neg":""}">${num(mQty)} pcs</b><span>Cukup untuk ${num(Math.max(0,mQty))} pack</span></div>
   </div>
-  ${pQty<0?`<div class="banner">Piece sabun lepas minus. Catat Buka karton atau koreksi opname supaya angka stok sesuai fisik.</div>`:""}
+  ${pQty<0?`<div class="banner">Piece sabun lepas minus dan karton sudah habis. Catat pembelian karton atau koreksi opname supaya angka stok sesuai fisik.</div>`:""}
   <div class="panel"><div class="row"><h3>Produk jual (SKU)</h3><div class="sp"></div>${btn("product","+ Produk")}</div>
   ${prods.length?`<div class="tbl"><table><thead><tr><th>SKU</th><th>Produk</th><th class="n">Isi</th><th class="n">Stok</th><th>Status</th><th>Cara kerja stok</th></tr></thead><tbody>${prods.map(prow).join("")}</tbody></table></div>`
   :`<div class="empty"><b>Belum ada produk</b>Tambahkan SKU beserta isi sabunnya.</div>`}</div>
@@ -792,7 +795,7 @@ V.stock=()=>{
   :`<div class="empty"><b>Belum ada bahan</b>Tambahkan karton sabun, piece sabun, dan bubble mailer.</div>`}</div>
   ${sf?outVsOrders(sf):""}
   <div class="panel"><div class="row"><h3>Riwayat stok · ${esc(mname(M()))}</h3><div class="sp"></div>${btn("move","Penyesuaian / opname")}</div>
-  ${history.length?`<div class="tbl"><table><thead><tr><th>Tanggal</th><th>Kegiatan</th><th>Perubahan</th><th>Catatan</th></tr></thead><tbody>${history.map(x=>{const[a,b]=hdesc(x);return`<tr ${x._k==="sret"&&!canTab("buy")?"":`class="click" data-edit="${x._k==="prod"?"prod":x._k}" data-id="${x.id}"`}><td>${fdate(x.date)}</td><td>${a}</td><td class="wrapcell">${b}</td><td class="wrapcell">${esc(x.note||"")}</td></tr>`}).join("")}</tbody></table></div>`
+  ${history.length?`<div class="tbl"><table><thead><tr><th>Tanggal</th><th>Kegiatan</th><th>Perubahan</th><th>Catatan</th></tr></thead><tbody>${history.map(x=>{const[a,b]=hdesc(x);return`<tr ${x._k==="auto"||(x._k==="sret"&&!canTab("buy"))?"":`class="click" data-edit="${x._k==="prod"?"prod":x._k}" data-id="${x.id}"`}><td>${fdate(x.date)}</td><td>${a}</td><td class="wrapcell">${b}</td><td class="wrapcell">${esc(x.note||"")}</td></tr>`}).join("")}</tbody></table></div>`
   :`<p class="hint">Buka karton, packing, barang rusak, sampel, dan koreksi opname muncul di sini. Penjualan dan pembelian mengubah stok otomatis.</p>`}</div>`;
 };
 
@@ -1774,7 +1777,7 @@ function openForm(kind,id,preset){
       ${F("Tanggal",inp("date",r.date||defDate(),"date","required"))}${F("Produk",`<select name="productId" required id="pkprod">${prodOptions(r.productId,p=>p.stocked)}</select>`)}
       ${F("Jumlah pack",inp("qty",r.qty??1,"number",'min="1" step="1" required'))}</div>
       ${F("Catatan",inp("note",r.note),1)}
-      <p class="hint" id="pkline"></p><p class="hint">Tersedia ${num(s.Mt[s.PC]||0)} piece lepas dan ${num(s.Mt[s.ML]||0)} bubble mailer.</p>`;
+      <p class="hint" id="pkline"></p><p class="hint">Tersedia ${num(s.Mt[s.PC]||0)} piece lepas + ${num(s.Mt[s.K]||0)} karton (dibuka otomatis kalau piece kurang) dan ${num(s.Mt[s.ML]||0)} bubble mailer.</p>`;
   }else if(kind==="cost"||kind==="cash"||kind==="asset"){
     const isCost=kind==="cost",isAsset=kind==="asset",type=isCost||isAsset?"keluar":(r.type||"masuk");
     const cats=isCost?OUT_CAT.filter(c=>!EXCL.includes(c)):(type==="keluar"?["Prive / ambil pemilik"]:IN_CAT);
@@ -1922,7 +1925,7 @@ function updateSum(){
     if(self&&leftStock(self))for(const it of self.items||[]){const p=byId("products",it.productId);if(p?.stocked)s.P[p.id]+= +it.qty||0;else if(s.PC)s.Mt[s.PC]+=(+it.qty||0)*(+p?.pcs||0);}
     rows.forEach(r=>{const p=byId("products",r.querySelector("[name=pid]").value),q=+r.querySelector("[name=qty]").value||0;if(!p)return;if(p.stocked)needP[p.id]=(needP[p.id]||0)+q;else piece+=q*(+p.pcs||0);});
     const msg=[];for(const id in needP){if(needP[id]>(s.P[id]||0))msg.push(`stok pack ${byId("products",id).name} tinggal ${num(s.P[id]||0)}`);}
-    if(piece&&piece>(s.Mt[s.PC]||0))msg.push(`piece sabun lepas tinggal ${num(s.Mt[s.PC]||0)} (butuh ${num(piece)})`);
+    const avail=(s.Mt[s.PC]||0)+(s.Mt[s.K]||0)*s.perK;if(piece&&piece>avail)msg.push(`piece sabun lepas + karton tinggal ${num(avail)} (butuh ${num(piece)})`);
     const sl=document.getElementById("stockline");sl.textContent=msg.length?"Perhatian: "+msg.join("; ")+". Lakukan packing atau buka karton.":(piece?`Akan memakai ${num(piece)} piece sabun lepas.`:"");sl.className=msg.length?"hint neg":"hint";
   }else el.textContent=`Total ${rp(g+(+dform.extra.value||0))}`;
 }
