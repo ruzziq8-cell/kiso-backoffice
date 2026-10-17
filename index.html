@@ -200,7 +200,9 @@ const ORDER_ST={baru:["Baru","acc"],dikirim:["Dikirim","warn"],selesai:["Selesai
 /* free samples (manual order marked as sample, or every item priced 0): stock goes out, but no sales/omzet; their HPP is a promotion cost */
 const SAMPLE_T={gratis:"Sampel gratis",affiliate:"Sampel affiliator"};
 const isSample=o=>!o.imported&&(!!SAMPLE_T[o.sample]||((o.items||[]).length>0&&(o.items||[]).every(it=>!(+it.price))&&!(+o.fee)));
-const leftStock=o=>counts(o)||o.status==="gagal"||(isSample(o)&&o.status!=="batal"&&o.status!=="pending");
+/* Shopee "kilat" orders are shipped by an SPX agent from stock it bought earlier: a sale, but nothing leaves our warehouse */
+const kilatSkip=o=>!!o.kilat&&!!S.settings.kilatOn&&(o.date||"")>=(S.settings.kilatFrom||"");
+const leftStock=o=>!kilatSkip(o)&&(counts(o)||o.status==="gagal"||(isSample(o)&&o.status!=="batal"&&o.status!=="pending"));
 const counts=o=>o.status!=="batal"&&o.status!=="pending"&&!isSample(o);
 const BUY_ST={dipesan:["Dipesan","warn"],diterima:["Diterima","good"],batal:["Batal","bad"]};
 const ASSET="Aset tetap";
@@ -283,7 +285,7 @@ function derive(){
   const settle=new Map(),unknown=[],adj=[];
   for(const d of S.settles){for(const r of d.rows||[])settle.set(r.i,{settle:+r.st||0,fee:+r.f||0,ads:+r.a||0,comp:r.c||null,fa:+r.fa||0,date:d.date,od:r.od,ch:d.ch,acc:d.account});for(const a of d.adj||[])adj.push({...a,date:d.date,ch:d.ch,acc:d.account});}
   const imp=[];
-  for(const d of S.orderdays)for(const e of d.orders||[])imp.push({id:"x"+e.i,ref:e.i,date:d.date,time:e.t||"",channel:d.ch,status:e.s,imported:true,src:e.c||"",creator:e.cr||"",prov:e.pv||"",pay:e.py||"",items:(e.it||[]).map(([pid,qty,gross,hpp])=>({productId:pid,qty:+qty||0,price:(+qty?(+gross||0)/(+qty):0),hpp:+hpp||0}))});
+  for(const d of S.orderdays)for(const e of d.orders||[])imp.push({id:"x"+e.i,ref:e.i,date:d.date,time:e.t||"",channel:d.ch,status:e.s,imported:true,src:e.c||"",creator:e.cr||"",prov:e.pv||"",pay:e.py||"",kilat:!!e.k,items:(e.it||[]).map(([pid,qty,gross,hpp])=>({productId:pid,qty:+qty||0,price:(+qty?(+gross||0)/(+qty):0),hpp:+hpp||0}))});
   const known=new Set(imp.map(o=>o.ref));
   for(const [i,v] of settle)if(!known.has(i))unknown.push({i,...v});
   const rate={};
@@ -681,7 +683,7 @@ V.sales=()=>{
   const body=shown.map(([o,t])=>{const st=ORDER_ST[o.status]||ORDER_ST.baru;
     const pay=MP.includes(o.channel)?(t.settled?`<span class="pill good">Cair ${fdate(t.sdate)}</span>`:`<span class="pill">Piutang</span>`):`<span class="pill good">${esc(aname(o.account))}</span>`;
     const attrs=o.imported?`title="Diimpor dari file ${esc(o.channel)}${o.src?" · sumber "+esc(o.src):""}"`:`class="click" data-edit="order" data-id="${o.id}"`;
-    return`<tr ${attrs}><td>${fdate(o.date)}${o.time?`<div class="hint">${esc(o.time)}</div>`:""}</td><td>${esc(o.channel)}${o.imported?' <span class="pill acc">Impor</span>':""}</td><td>${esc(o.ref||"–")}</td><td class="wrapcell">${(o.items||[]).map(it=>`${esc(pname(it.productId,pm))} ×${num(+it.qty)}`).join(", ")}</td><td><span class="pill ${st[1]}">${st[0]}</span>${isSample(o)?` <span class="pill acc">${SAMPLE_T[o.sample]||"Sampel (Rp0)"}</span>`:""}</td><td>${pay}</td><td class="n">${isSample(o)?'<span class="mut">bukan omzet</span>':rp(t.gross)}</td><td class="n mut">${t.est?"≈ ":""}${rp(t.fee)}${t.refund?`<div class="hint">retur ${rp(t.refund)}</div>`:""}</td><td class="n">${rp(t.net)}</td></tr>`}).join("");
+    return`<tr ${attrs}><td>${fdate(o.date)}${o.time?`<div class="hint">${esc(o.time)}</div>`:""}</td><td>${esc(o.channel)}${o.imported?' <span class="pill acc">Impor</span>':""}${o.kilat?' <span class="pill warn" title="Pengiriman diatur ±15 menit setelah bayar (agen SPX)${kilatSkip(o)?": tidak mengurangi stok gudang":": masih mengurangi stok (aturan kilat nonaktif untuk tanggal ini)"}">Kilat · agen SPX</span>':""}</td><td>${esc(o.ref||"–")}</td><td class="wrapcell">${(o.items||[]).map(it=>`${esc(pname(it.productId,pm))} ×${num(+it.qty)}`).join(", ")}</td><td><span class="pill ${st[1]}">${st[0]}</span>${isSample(o)?` <span class="pill acc">${SAMPLE_T[o.sample]||"Sampel (Rp0)"}</span>`:""}</td><td>${pay}</td><td class="n">${isSample(o)?'<span class="mut">bukan omzet</span>':rp(t.gross)}</td><td class="n mut">${t.est?"≈ ":""}${rp(t.fee)}${t.refund?`<div class="hint">retur ${rp(t.refund)}</div>`:""}</td><td class="n">${rp(t.net)}</td></tr>`}).join("");
   const est=derive().rate;
   return`<div class="row"><h2>Penjualan</h2><div class="sp"></div>${S.canWrite?`<button class="btn" data-import>Impor file marketplace</button>`:""}${btn("order","+ Pesanan manual",1)}</div>
   <div class="chips">${["Semua",...CHANNELS].map(c=>`<button data-chan="${c}" aria-pressed="${c===salesFilter}">${c}</button>`).join("")}</div>
@@ -946,6 +948,10 @@ V.set=()=>{const op=S.settings.arOpening||{};return`${userPanel()}<h2>Pengaturan
     <h3>Saldo awal piutang marketplace</h3>
     <p class="hint">Nilai pesanan yang sudah terjadi tapi belum cair saat kamu mulai memakai aplikasi ini. Pencairan untuk pesanan yang tidak ada di aplikasi otomatis mengurangi saldo awal ini.</p>
     <div class="fgrid">${MP.map((ch,i)=>`<label class="field"><span>${ch} (Rp)</span><input id="setAr${i}" type="number" step="0.01" inputmode="decimal" value="${+op[ch]||0}"></label>`).join("")}</div>
+    <h3>Pesanan kilat Shopee (agen SPX)</h3>
+    <p class="hint">Pesanan yang pengirimannya diatur otomatis ±15 menit setelah dibayar (siang atau malam) ditandai <b>Kilat · agen SPX</b> saat impor Order.all. Kalau aturan ini aktif, pesanan kilat tetap dihitung sebagai penjualan dan HPP, tapi <b>tidak mengurangi stok gudang</b>.</p>
+    <div class="fgrid"><label class="field"><span>Aturan</span><select id="setKilat"><option value="">Nonaktif — kilat tetap mengurangi stok</option><option value="1"${S.settings.kilatOn?" selected":""}>Aktif — kilat tidak mengurangi stok</option></select></label>
+    <label class="field"><span>Berlaku untuk pesanan mulai tanggal (kosong = semua)</span><input id="setKilatFrom" type="date" value="${esc(S.settings.kilatFrom||"")}"></label></div>
     ${S.canWrite?`<div><button class="btn pri" id="saveSet">Simpan</button></div>`:""}
     <p class="hint">Rekening diatur di tab Bank & Kas. Beban rutin dan aset di tab Beban & Aset. Isi per karton di bahan "Karton sabun" pada tab Stok. Kode SKU marketplace diatur per produk di tab Stok.</p>
   </div>
@@ -963,9 +969,13 @@ const CHX={[TT]:{pre:"tiktok",acc:TT_ACC,accName:"Saldo TikTok Shop"},[SP]:{pre:
 /* Shopee exports write numbers Indonesian-style: 49.600 = 49600, 44.007,54 = 44007.54 */
 const nvi=v=>{let t=clean(v);if(!t||t==="-")return 0;t=t.replace(/%$/,"");if(/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t))t=t.replace(/\./g,"").replace(",",".");else if(/^-?\d+,\d+$/.test(t))t=t.replace(",",".");const x=Number(t);return isFinite(x)?x:0;};
 const SP_STATUS=(st,reason)=>{if(/^Batal/i.test(st))return/Pengiriman gagal/i.test(reason||"")?"gagal":/belum dibayar/i.test(reason||"")?"pending":"batal";if(/Belum Bayar/i.test(st))return"pending";if(/Selesai/i.test(st))return"selesai";if(/Dikirim/i.test(st)&&!/Perlu/i.test(st))return"dikirim";return"baru";};
+/* minutes from payment to "Waktu Pengiriman Diatur". Shopee's SPX-agent ("kilat") orders are arranged automatically 15–16 min after payment, day or night;
+   orders the warehouse packs are arranged hours later, usually in an afternoon batch */
+const spMin=v=>{const m=clean(v).match(/^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)/);return m?Date.UTC(+m[1],m[2]-1,+m[3],+m[4],+m[5])/60000:null;};
+const spGap=r=>{const a=spMin(r["Waktu Pembayaran Dilakukan"]),b=spMin(r["Waktu Pengiriman Diatur"]);return a==null||b==null?null:b-a;};
 function parseShopeeOrders(rows,name){
   const by=new Map();for(const r of rows){const id=clean(r["No. Pesanan"]);if(!id)continue;if(!by.has(id))by.set(id,[]);by.get(id).push(r);}
-  const days={},skuMap={},unmatched={};let n=0,skipped=0;const cnt={};
+  const days={},skuMap={},unmatched={};let n=0,skipped=0,kilat=0;const cnt={};
   for(const [id,lines] of by){
     const r0=lines[0],date=ymd(r0["Waktu Pesanan Dibuat"]);if(!date){skipped++;continue;}
     const it=[];let bad=false;
@@ -974,10 +984,12 @@ function parseShopeeOrders(rows,name){
       skuMap[key]=p.name;it.push([p.id,nvi(l["Jumlah"])||1,nvi(l["Subtotal Pesanan"]),+p.hpp||0]);}
     if(bad){skipped++;continue;}
     const s=SP_STATUS(clean(r0["Status Pesanan"]),r0["Alasan Pembatalan"]);cnt[s]=(cnt[s]||0)+1;n++;
-    (days[date]||=[]).push({i:id,t:hm(r0["Waktu Pesanan Dibuat"]),s,it,c:"",cr:"",pv:clean(r0["Provinsi"]),py:clean(r0["Metode Pembayaran"])});
+    const gap=spGap(r0),o={i:id,t:hm(r0["Waktu Pesanan Dibuat"]),s,it,c:"",cr:"",pv:clean(r0["Provinsi"]),py:clean(r0["Metode Pembayaran"])};
+    if(gap!=null&&gap<=25){o.k=1;kilat++;}
+    (days[date]||=[]).push(o);
   }
   const dates=Object.keys(days).sort();
-  return{kind:"orders",ch:SP,name,label:"Pesanan Shopee",days,n,skipped,cnt,skuMap,unmatched,from:dates[0],to:dates[dates.length-1]};
+  return{kind:"orders",ch:SP,name,label:"Pesanan Shopee",days,n,skipped,kilat,cnt,skuMap,unmatched,from:dates[0],to:dates[dates.length-1]};
 }
 function parseShopeeIncome(wb,name){
   let det=null,sumCheck=null;
@@ -1190,9 +1202,10 @@ function impHtml(busy){
     let d="";
     if(x.kind==="orders"){
       const ex=new Map();for(const doc of S.orderdays)for(const e of doc.orders||[])ex.set(e.i,e);
-      let nw=0,up=0;for(const list of Object.values(x.days))for(const e of list){const o=ex.get(e.i);if(!o)nw++;else if(o.s!==e.s||JSON.stringify(o.it.map(a=>a.slice(0,3)))!==JSON.stringify(e.it.map(a=>a.slice(0,3))))up++;}
+      let nw=0,up=0;for(const list of Object.values(x.days))for(const e of list){const o=ex.get(e.i);if(!o)nw++;else if(o.s!==e.s||!!o.k!==!!e.k||JSON.stringify(o.it.map(a=>a.slice(0,3)))!==JSON.stringify(e.it.map(a=>a.slice(0,3))))up++;}
       d=`<div>${fdate(x.from)} – ${fdate(x.to)} · <b>${num(x.n)}</b> pesanan: ${num(nw)} baru, ${num(up)} berubah status, ${num(x.n-nw-up)} sudah ada.</div>
       <div class="hint">${Object.entries(x.cnt).map(([k,v])=>`${(ORDER_ST[k]||[k])[0]} ${num(v)}`).join(" · ")}. Batal dan belum dibayar tidak dihitung ke omzet. Batal setelah dikirim tetap mengurangi stok sampai paketnya dicatat kembali lewat Retur dari pembeli.</div>
+      ${x.ch===SP?`<div class="hint"><b>${num(x.kilat||0)}</b> pesanan kilat (pengiriman diatur ≤25 menit setelah bayar, dikirim agen SPX): dicatat sebagai penjualan, <b>${S.settings.kilatOn?"tidak mengurangi stok gudang"+(S.settings.kilatFrom?" (pesanan mulai "+fdate(S.settings.kilatFrom)+")":""):"masih mengurangi stok karena aturan kilat di Pengaturan nonaktif"}</b>.</div>`:""}
       <div class="hint">Pencocokan SKU: ${Object.entries(x.skuMap).map(([k,v])=>`${esc(k.split(" · ")[0])} → ${esc(v)}`).join(", ")}</div>
       ${Object.keys(x.unmatched).length?`<div class="banner">${num(x.skipped)} pesanan dilewati karena SKU tidak dikenali: ${Object.entries(x.unmatched).map(([k,v])=>`${esc(k)} (${v})`).join(", ")}. Tambahkan kode SKU marketplace di produknya (tab Stok), lalu impor ulang.</div>`:""}`;
     }else if(x.kind==="income"){
@@ -1936,7 +1949,7 @@ dform.addEventListener("submit",async e=>{
 });
 async function saveSettings(){
   const arOpening={};MP.forEach((ch,i)=>arOpening[ch]=+document.getElementById("setAr"+i).value||0);
-  try{await S.db.doc("config/main").set({...S.settings,storeName:document.getElementById("setName").value.trim()||"KISO.ID",arOpening});toast("Pengaturan disimpan");}catch(err){toast(errMsg(err));}
+  try{await S.db.doc("config/main").set({...S.settings,storeName:document.getElementById("setName").value.trim()||"KISO.ID",arOpening,kilatOn:!!document.getElementById("setKilat").value,kilatFrom:document.getElementById("setKilatFrom").value||""});toast("Pengaturan disimpan");}catch(err){toast(errMsg(err));}
 }
 function errMsg(err){
   if(err?.code==="42501"||/row-level security/i.test(err?.message||""))return"Akun ini tidak punya izin mengubah data ini.";
