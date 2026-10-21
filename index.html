@@ -976,7 +976,7 @@ V.perf=()=>{
   body+=`<div class="panel"><h3>Kesimpulan & yang harus dilakukan</h3>${Fd.length?Fd.map(f=>`<div style="padding:10px 0;border-top:1px solid var(--line)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${lvlPill[f.lvl]}<b>${esc(f.title)}</b></div><p style="margin:6px 0">${f.text}</p>${f.acts.length?`<ul style="margin:4px 0 0 18px;padding:0">${f.acts.map(a=>`<li>${a}</li>`).join("")}</ul>`:""}</div>`).join(""):'<p class="hint">Belum cukup data untuk kesimpulan.</p>'}</div>`;
   /* forward management (monthly, all channels) */
   if(perfMode==="bulan"&&!P.C){
-    const sc=(l,dg,dads,dhpp)=>{const g2=P.projG*(1+dg),cm=g2*(P.cmr-(dhpp||0)*P.hppR),ads=P.projG?P.adsAll/P.g*P.projG*(1+(dads??dg)):0,n=cm-ads-P.fixed+P.pl.income*(P.nDays/P.elapsed);return`<tr><td>${l}</td><td class="n">${rp0(g2)}</td><td class="n ${n<0?"neg":""}">${rp0(n)}</td><td class="n">${pc(g2?n/g2:null)}</td></tr>`;};
+    const sc=(l,dg,dads,dhpp)=>{const g2=P.projG*(1+dg),cm=g2*(P.cmr+(dhpp||0)*P.hppR),ads=P.projG?P.adsAll/P.g*P.projG*(1+(dads??dg)):0,n=cm-ads-P.fixed+P.pl.income*(P.nDays/P.elapsed);return`<tr><td>${l}</td><td class="n">${rp0(g2)}</td><td class="n ${n<0?"neg":""}">${rp0(n)}</td><td class="n">${pc(g2?n/g2:null)}</td></tr>`;};
     const tgt=r=>P.vr>r?P.fixed/(P.vr-r):null;
     const plan={"7":[],"30":[],"90":[]};for(const f of Fd)if(f.lvl!=="good"||f.horizon!=="7")for(const a of f.acts.slice(0,2))plan[f.horizon].push(a);
     const s=stockOf(),share=P.g?Math.max(...[TT,SP].map(c=>(P.pl.perCh[c]||0)/P.g)):0;
