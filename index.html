@@ -220,9 +220,16 @@ const ROLE={karton:"Karton sabun",piece:"Piece sabun lepas",mailer:"Bubble maile
 const NOSTOCK=m=>m.role==="box";
 const ADS_ACC="saldo-iklan-tiktok",ADS_SP_ACC="saldo-iklan-shopee";
 /* Shopee ad reports are period totals; overlapping uploads (1–14 then 1–31) must not be counted twice, so a longer/later report replaces the shorter one it overlaps */
+/* Shopee ad reports cover periods that can overlap (18–19 and 19–20). Each day is taken from the most specific report that covers it
+   (shortest period, then newest); a report's uncovered days become segments whose numbers are prorated by days, so nothing counts twice and no day is lost */
 function shopeeAdsSet(){
-  const rs=S.adsreports.filter(r=>r.kind==="shopeeads").map(r=>({...r,spend:(r.rows||[]).reduce((a,x)=>a+(+x.spend||0),0),len:mdays(r.from,r.to)})).sort((a,b)=>a.from.localeCompare(b.from)||b.len-a.len),out=[];
-  for(const r of rs)if(!out.some(o=>o.from<=r.to&&r.from<=o.to))out.push(r);return out;
+  const rs=S.adsreports.filter(r=>r.kind==="shopeeads"&&r.from&&r.to).map(r=>({...r,len:mdays(r.from,r.to)})).sort((a,b)=>a.len-b.len||(b.created||0)-(a.created||0)||(b.to||"").localeCompare(a.to||"")),taken=new Set(),out=[];
+  const scale=(x,f)=>Object.fromEntries(Object.entries(x).map(([k,v])=>[k,typeof v==="number"&&k!=="rank"?v*f:v]));
+  for(const r of rs){let seg=null;const segs=[];
+    for(let d=r.from;d<=r.to;d=addDays(d,1)){if(taken.has(d)){seg=null;continue;}taken.add(d);if(seg)seg.to=d;else{seg={from:d,to:d};segs.push(seg);}}
+    segs.forEach((g,i)=>{const n=mdays(g.from,g.to),f=n/r.len,rows=f===1?(r.rows||[]):(r.rows||[]).map(x=>scale(x,f));
+      out.push({...r,id:segs.length>1||f<1?`${r.id}#${i}`:r.id,from:g.from,to:g.to,len:n,frac:f,rows,spend:rows.reduce((a,x)=>a+(+x.spend||0),0)});});}
+  return out.sort((a,b)=>a.from.localeCompare(b.from));
 }
 const mdays=(a,b)=>Math.round((new Date(b+"T00:00")-new Date(a+"T00:00"))/864e5)+1;
 /* ad spend of a period report attributed to a month in proportion to the days that fall in it */
