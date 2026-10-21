@@ -169,6 +169,7 @@ dialog form{display:grid;gap:14px;padding:18px}
     <nav role="tablist" id="tabs">
       <button role="tab" data-tab="dash">Dashboard</button>
       <button role="tab" data-tab="daily">Laporan Harian</button>
+      <button role="tab" data-tab="perf">Analisa Kinerja</button>
       <button role="tab" data-tab="sales">Penjualan</button>
       <button role="tab" data-tab="buy">Pembelian</button>
       <button role="tab" data-tab="ap">Hutang</button>
@@ -253,7 +254,7 @@ document.getElementById("themeBtn")?.addEventListener("click",()=>{const i=THEME
    Write protection for view-only accounts is enforced by claude.ai; module hiding for editors is a display rule. ---------- */
 const ROLES={
   ceo:{name:"CEO",tabs:"*",write:true,desc:"Melihat dan mengubah semua modul"},
-  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","stock","sales","buy","ap","price","cost","bank","ar","ads","report"],write:true,desc:"Melihat dan mengubah modul keuangan (Dashboard, Laporan Harian, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
+  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","stock","sales","buy","ap","price","cost","bank","ar","ads","report"],write:true,desc:"Melihat dan mengubah modul keuangan (Dashboard, Laporan Harian, Analisa Kinerja, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
   gudang:{name:"Gudang",tabs:["stock"],write:true,desc:"Hanya modul Stok (melihat dan mengubah)"},
   pemilik:{name:"Pemilik",tabs:"*",write:false,desc:"Melihat semua modul, tidak bisa mengubah apa pun"},
 };
@@ -820,6 +821,191 @@ function outVsOrders(sf){
   <p class="hint">Dalam satuan sabun. "Belum keluar" = pesanan yang sudah masuk tapi barangnya belum dicatat keluar (normal untuk pesanan Shopee setelah 17.00 dan TikTok setelah 20.30). Kalau angkanya terus naik atau minus, ada barang keluar yang belum/lebih dicatat.</p>
   <div class="tbl"><table><thead><tr><th>Tanggal</th><th class="n">Pesanan</th><th class="n">Sabun dipesan</th><th class="n">Resi</th><th class="n">Sabun keluar</th><th class="n">Belum keluar (kumulatif)</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
+
+/* plain-language guide to each ad metric, with the period's own value and whether it is good */
+function perfGlossary(v){
+  const pc=x=>x==null||!isFinite(x)?"–":(x*100).toFixed(1).replace(".",",")+"%",p=(ok,warn)=>ok==null?"":ok?'<span class="pill good">Baik</span>':warn?'<span class="pill warn">Perhatikan</span>':'<span class="pill bad">Buruk</span>';
+  const G=[
+    ["ROAS","Return on Ad Spend",f2(v.roas),v.roas&&v.be?p(v.roas>=v.be*1.15,v.roas>=v.be):"","Omzet yang dihasilkan iklan untuk setiap Rp1 biaya iklan. ROAS 5 = Rp1 iklan menghasilkan Rp5 omzet.","Bagus: iklan efisien. Kalau jauh di atas ROAS impas, budget boleh dinaikkan bertahap.","Buruk: iklan boros. Di bawah ROAS impas berarti iklan merugi, jadi naikkan target ROAS, ganti materi, atau kurangi budget."],
+    ["ROAS impas","Break-even ROAS",f2(v.be),"","ROAS minimal supaya iklan tidak rugi = omzet ÷ laba kotor sebelum iklan. Ditentukan oleh harga, HPP, dan potongan marketplace.","Kurang baik: margin tipis, iklan harus sangat efisien supaya untung. Turunkan dengan menaikkan harga, menekan HPP, atau mengurangi potongan.","Baik: margin tebal, iklan lebih leluasa untuk dinaikkan."],
+    ["ROI iklan","Return on Investment",pc(v.roi),v.roi!=null?p(v.roi>=0.3,v.roi>=0):"","Laba setelah iklan dibagi biaya iklan. ROI 50% = setiap Rp1 iklan menyisakan laba Rp0,50 setelah HPP, potongan, dan iklan.","Bagus: iklan menghasilkan laba bersih. Pertahankan, lalu skalakan.","Di bawah 0% berarti iklan menghabiskan lebih banyak dari laba yang dihasilkan. Kurangi budget atau perbaiki ROAS."],
+    ["ACOS","Advertising Cost of Sales",pc(v.acos),v.acos!=null&&v.acosBe?p(v.acos<=v.acosBe*0.85,v.acos<=v.acosBe):"","Biaya iklan ÷ omzet dari iklan (kebalikan ROAS). ACOS 20% = Rp20 iklan untuk setiap Rp100 omzet iklan.","Buruk: porsi omzet habis untuk iklan. Di atas batas ACOS (margin kotor) berarti rugi.","Bagus: iklan murah dibanding penjualannya."],
+    ["TACOS","Total Advertising Cost of Sales",pc(v.tacos),v.tacos!=null&&v.acosBe?p(v.tacos<=v.acosBe*0.5,v.tacos<=v.acosBe*0.8):"","Biaya iklan ÷ seluruh omzet, termasuk penjualan organik. Menunjukkan seberapa bergantung toko pada iklan.","Kurang baik: penjualan sangat bergantung pada iklan dan margin tergerus. Bangun penjualan organik lewat konten, ulasan, dan pembeli ulang.","Bagus: banyak penjualan organik. Jika terlalu rendah, mungkin ada peluang tumbuh dengan menambah iklan."],
+    ["CTR","Click-Through Rate",pc(v.ctr),v.ctr!=null?p(v.ctr>=0.02,v.ctr>=0.01):"","Persentase orang yang mengklik iklan dari yang melihatnya. Ukuran daya tarik materi iklan (video, foto, judul).","Bagus: materi iklan menarik. Pertahankan dan jadikan acuan materi berikutnya.","Buruk: iklan dilihat tapi tidak diklik. Ganti hook 3 detik pertama, thumbnail, atau judul, dan uji beberapa materi."],
+    ["CPC","Cost per Click",v.cpc?rp0(v.cpc):"–","","Biaya rata-rata untuk satu klik iklan = biaya iklan ÷ jumlah klik.","Kurang baik: klik mahal, karena persaingan tinggi atau CTR rendah. Perbaiki CTR atau persempit target.","Bagus: traffic murah. Pastikan kliknya juga berubah jadi pesanan (lihat CVR)."],
+    ["CVR","Conversion Rate",pc(v.cvr),v.cvr!=null?p(v.cvr>=0.05,v.cvr>=0.02):"","Persentase klik iklan yang menjadi pesanan. Ukuran kekuatan halaman produk, harga, ulasan, dan promo.","Bagus: halaman produk meyakinkan. Traffic tambahan akan efektif.","Buruk: banyak klik tapi sedikit beli. Perbaiki foto, deskripsi, ulasan, harga atau voucher, dan cek kecocokan iklan dengan produk."],
+  ];
+  return`<div class="panel"><h3>Arti indikator iklan & penjualan</h3><div class="tbl"><table><thead><tr><th>Indikator</th><th class="n">Nilai periode ini</th><th>Artinya</th><th>Kalau tinggi</th><th>Kalau rendah</th></tr></thead><tbody>
+  ${G.map(([k,full,val,st,mean,hi,lo])=>`<tr><td><b>${k}</b><div class="hint">${full}</div></td><td class="n">${val} ${st}</td><td class="wrapcell">${mean}</td><td class="wrapcell">${hi}</td><td class="wrapcell">${lo}</td></tr>`).join("")}
+  </tbody></table></div><p class="hint">Patokan "baik" untuk CTR (≥2%) dan CVR (≥5%) adalah kisaran umum iklan marketplace. Untuk ROAS, ROI, ACOS, dan TACOS, patokannya dihitung dari margin produk Anda sendiri.</p></div>`;
+}
+
+/* ---------- Analisa kinerja: breakdown, conclusions and forward plan, built from the same numbers as Dashboard and Laporan Harian ---------- */
+function perfData(m,ch){
+  const C=ch==="Semua"?null:ch,pl=monthPL(m,C),D=dailyStats(m,ch),T0=today(),start=m+"-01",end=endOf(m),nDays=lastDay(m);
+  const act=D.filter(x=>x.date<=T0&&(x.n||x.ads)),lastD=act.length?act[act.length-1].d:0;
+  const complete=end<T0,elapsed=complete?nDays:Math.max(1,lastD);
+  const A=D.reduce((a,x)=>{for(const k of ["ads","adsGmv","adsOrders","impr","clicks"])a[k]=(a[k]||0)+x[k];return a;},{});
+  /* CTR/CPC/CVR need clicks, which only some report days have: use those days only so the ratios are not mixed */
+  const K=D.filter(x=>x.ctr!=null).reduce((a,x)=>{for(const k of ["ads","adsOrders","impr","clicks"])a[k]=(a[k]||0)+x[k];return a;},{});A.ctr=K.impr?K.clicks/K.impr:null;A.cpc=K.clicks?K.ads/K.clicks:null;A.cvr=K.clicks?K.adsOrders/K.clicks:null;
+  const pm=pmap();let soap=0,canc=0,all=0;
+  for(const o of ORD())if((o.date||"").slice(0,7)===m&&(!C||o.channel===C)&&!isSample(o)){all++;if(o.status==="batal"||o.status==="gagal")canc++;if(counts(o))for(const it of o.items||[])soap+=(+it.qty||0)*(+pm[it.productId]?.pcs||0);}
+  const recur=S.recurring.filter(r=>r.active!==false).reduce((a,r)=>a+(+r.amount||0),0);
+  const fixedAct=C?0:pl.opex+pl.dep,fixedPlan=C?0:recur+pl.dep;
+  const fixed=C?0:(complete?fixedAct:Math.max(fixedAct,fixedPlan));
+  const g=pl.gross,adsAll=pl.ads+pl.aff,var_=pl.grossProfit-adsAll,vr=g?var_/g:0;
+  const be=vr>0&&fixed?fixed/vr:null,aov=pl.count?g/pl.count:null;
+  const projG=complete?g:g/elapsed*nDays,projNet=complete?pl.net:projG*vr-fixed+pl.income*(nDays/elapsed);
+  return{m,ch,C,pl,D,act,complete,elapsed,nDays,A,soap,canc,all,recur,fixedAct,fixedPlan,fixed,g,adsAll,var_,vr,be,aov,projG,projNet,
+    cmr:g?pl.grossProfit/g:0,feeR:g?(pl.fee+pl.refund+pl.adj)/g:0,hppR:g?pl.hpp/g:0,tacos:g?adsAll/g:null,
+    roas:A.ads?A.adsGmv/A.ads:null,beRoas:pl.grossProfit>0?g/pl.grossProfit:null,soapPrice:soap?g/soap:null};
+}
+const perfPrevM=m=>{const d=new Date(+m.slice(0,4),+m.slice(5,7)-2,1);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;};
+function perfFindings(P,mode,day){
+  const F=[],add=(lvl,title,text,acts,horizon)=>F.push({lvl,title,text,acts:acts||[],horizon:horizon||"7"});
+  const pc=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
+  const {pl,g}=P;if(!g)return F;
+  /* 1. break-even */
+  if(!P.C&&P.fixed){
+    if(P.vr<=0)add("bad","Setiap penjualan masih rugi sebelum beban tetap",`Setelah potongan marketplace (${pc(P.feeR)}), HPP (${pc(P.hppR)}) dan iklan + affiliate (${pc(P.tacos)}), sisa per Rp100 omzet adalah ${pc(P.vr)}. Menambah omzet dengan struktur biaya ini justru menambah rugi.`,["Turunkan biaya iklan sampai TACOS di bawah margin kotor","Naikkan harga jual atau kurangi voucher/diskon penjual","Hentikan iklan SKU yang laba setelah iklannya minus"],"7");
+    else if(P.be){const per=P.be/P.nDays,gap=P.be-P.projG;
+      if(gap>0)add("bad","Proyeksi omzet di bawah titik impas",`Dengan margin setelah iklan ${pc(P.vr)}, beban tetap ${rp0(P.fixed)} sebulan baru tertutup di omzet ${rp0(P.be)} (≈ ${rp0(per)} per hari, ${P.aov?num(Math.ceil(per/P.aov)):"–"} pesanan per hari). Proyeksi bulan ini ${rp0(P.projG)}, kurang ${rp0(gap)}.`,[`Kejar tambahan omzet ${rp0(gap/Math.max(1,P.nDays-P.elapsed||1))} per hari di sisa bulan`,"Atau tekan beban tetap/iklan supaya titik impas turun"],"7");
+      else add("good","Omzet sudah di atas titik impas",`Titik impas bulan ini ${rp0(P.be)} (≈ ${rp0(per)}/hari). Proyeksi omzet ${rp0(P.projG)}, ${pc((P.projG-P.be)/P.be)} di atasnya.`,["Jaga margin: kenaikan omzet sebaiknya dari iklan dengan ROAS di atas impas"],"30");}
+  }
+  /* 2. ads per channel */
+  for(const c of P.C?[P.C]:[TT,SP]){const Q=P.C?P:perfData(P.m,c);if(!Q.A.ads)continue;const r=Q.roas,b=Q.beRoas;if(!r||!b)continue;
+    if(r<b)add("bad",`Iklan ${c} merugi`,`ROAS ${f2(r)} di bawah ROAS impas ${f2(b)}: setiap Rp1 iklan menghasilkan omzet yang marginnya tidak menutup biaya iklan. Biaya iklan ${rp0(Q.A.ads)} bulan ini.`,[`Naikkan target ROAS kampanye ke minimal ${f2(b*1.15)}`,"Matikan atau turunkan budget kampanye/SKU dengan ROAS terendah",`Batasi budget harian ${c} sampai ROAS kembali di atas impas`],"7");
+    else if(r<b*1.2)add("warn",`Iklan ${c} tipis di atas impas`,`ROAS ${f2(r)} vs impas ${f2(b)}. Masih untung, tapi sempit: sedikit penurunan ROAS membuat iklan rugi.`,["Pindahkan budget ke kampanye/SKU dengan ROAS tertinggi","Uji materi iklan baru untuk menaikkan CTR"],"7");
+    else if((Q.tacos||0)<Q.cmr*0.5)add("good",`Iklan ${c} untung, ruang untuk dinaikkan`,`ROAS ${f2(r)} jauh di atas impas ${f2(b)} dan TACOS ${pc(Q.tacos)} masih rendah dibanding margin kotor ${pc(Q.cmr)}.`,[`Naikkan budget ${c} bertahap 15–20% per 3 hari selama ROAS tetap ≥ ${f2(b*1.3)}`],"30");
+    else add("info",`Iklan ${c} untung, tapi porsi iklan sudah besar`,`ROAS ${f2(r)} di atas impas ${f2(b)}, namun TACOS ${pc(Q.tacos)} memakan lebih dari separuh margin kotor ${pc(Q.cmr)}. Menaikkan budget masih untung, tapi laba bersih tumbuh lebih lambat dari omzet.`,[`Naikkan budget ${c} hanya di kampanye/SKU dengan ROAS ≥ ${f2(b*1.5)}`,"Perbesar penjualan organik (konten, ulasan, pembeli ulang) supaya TACOS turun"],"30");}
+  /* 3. fees */
+  if(P.feeR>0.25){const top=Object.entries(pl.feeBy).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,v])=>`${k} ${pc(v/g)}`).join(", ");
+    add("warn","Potongan marketplace besar",`Potongan + retur ${pc(P.feeR)} dari omzet. Terbesar: ${top}.`,["Tinjau voucher dan subsidi ongkir yang ditanggung penjual","Evaluasi komisi affiliate per kreator: pertahankan yang menghasilkan","Pastikan program biaya tambahan (Gratis Ongkir XTRA, Growth Xtra) sepadan dengan kenaikan penjualannya"],"30");}
+  /* 4. SKU */
+  const from=mode==="hari"?day:P.m+"-01",to=mode==="hari"?day:endOf(P.m),K=skuStats(P.m,P.ch,from,to).filter(r=>r.gross>0).sort((a,b)=>b.profit-a.profit);
+  const losers=K.filter(r=>r.profit<0),best=K[0];
+  if(losers.length)add("bad","SKU yang rugi setelah iklan",losers.map(r=>`${r.name} (laba ${rp0(r.profit)}, ROAS ${f2(r.roas)} vs impas ${f2(r.be)})`).join("; ")+".",["Naikkan harga atau kurangi diskon SKU tersebut","Hentikan iklan khusus SKU tersebut dan arahkan ke paket yang lebih untung","Jadikan SKU kecil sebagai pintu masuk, lalu tawarkan paket lebih besar (bundling)"],"7");
+  if(best&&best.profit>0)add("good",`SKU paling menguntungkan: ${best.name}`,`Laba setelah iklan ${rp0(best.profit)} dari ${num(best.units)} pcs (margin ${pc(best.gross?best.profit/best.gross:null)}).`,["Prioritaskan SKU ini di LIVE, video, dan kampanye iklan","Pastikan stoknya tidak pernah kosong"],"30");
+  const totG=K.reduce((a,r)=>a+r.gross,0),totP=K.reduce((a,r)=>a+r.profit,0),avgM=totG?totP/totG:0;
+  for(const r of K)if(totG&&r.gross/totG>=0.1&&r.profit>0&&avgM>0&&r.profit/r.gross<avgM*0.7)add("warn",`${r.name} laris tapi marginnya tipis`,`${r.name} menyumbang ${pc(r.gross/totG)} omzet, tapi margin setelah iklannya hanya ${pc(r.profit/r.gross)} (rata-rata semua SKU ${pc(avgM)}). Laba per pesanan ${r.n?rp0(r.profit/r.n):"–"}. Penyebab utamanya biasanya biaya iklan (est. ${rp0(r.ads)}, ROAS ${f2(r.roas)}) atau harga jual yang terlalu rendah.`,[`Naikkan target ROAS kampanye ${r.name} atau kurangi diskon/voucher-nya`,"Tawarkan upgrade ke paket yang marginnya lebih tebal (mis. lewat harga paket atau voucher minimal belanja)"],"30");
+  /* 5. cancellations */
+  const cr=P.all?P.canc/P.all:0;if(P.all>=20&&cr>0.08)add("warn","Pesanan batal tinggi",`${num(P.canc)} dari ${num(P.all)} pesanan (${pc(cr)}) batal atau gagal kirim.`,["Konfirmasi pesanan COD lewat chat sebelum dikirim","Cek alasan batal terbanyak (ongkir mahal, alamat) dan perbaiki","Kirim lebih cepat: pesanan yang lama diproses lebih sering dibatalkan"],"7");
+  /* 6. trend */
+  if(mode==="bulan"){const s=P.act.filter(x=>x.n),l7=s.slice(-7),p7=s.slice(-14,-7),sm=a=>a.reduce((t,x)=>t+x.gross,0);
+    if(p7.length>=5&&l7.length>=5){const gr=(sm(l7)-sm(p7))/sm(p7);if(gr<-0.1)add("warn","Omzet 7 hari terakhir turun",`Turun ${pc(-gr)} dibanding 7 hari sebelumnya (${rp0(sm(l7))} vs ${rp0(sm(p7))}).`,["Cek apakah ada kampanye/LIVE yang berhenti atau stok yang kosong","Uji ulang materi iklan dan jadwal LIVE"],"7");
+      else if(gr>0.1)add("good","Omzet 7 hari terakhir naik",`Naik ${pc(gr)} dibanding 7 hari sebelumnya.`,["Catat apa yang berubah (materi, harga, kreator) dan pertahankan"],"30");}
+    const wd={};for(const x of s){const w=new Date(x.date+"T00:00").getDay();(wd[w]||=[]).push(x.gross);}
+    const avg=Object.entries(wd).filter(([,v])=>v.length>=2).map(([w,v])=>[+w,v.reduce((a,b)=>a+b,0)/v.length]).sort((a,b)=>b[1]-a[1]);
+    const dn=["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
+    if(avg.length>=4)add("info","Pola hari terbaik",`Rata-rata omzet tertinggi hari ${dn[avg[0][0]]} (${rp0(avg[0][1])}), terendah hari ${dn[avg[avg.length-1][0]]} (${rp0(avg[avg.length-1][1])}).`,[`Jadwalkan LIVE dan naikkan budget iklan menjelang hari ${dn[avg[0][0]]}`,`Pakai promo kecil di hari ${dn[avg[avg.length-1][0]]} untuk meratakan penjualan`],"30");}
+  /* 7. fixed costs */
+  if(!P.C&&P.fixedAct>0){const big=Object.entries(pl.opexBy).sort((a,b)=>b[1]-a[1])[0];if(big&&big[1]>g*0.08)add("info",`Beban tetap terbesar: ${big[0]}`,`${rp0(big[1])} bulan ini (${pc(big[1]/g)} dari omzet).`,["Tinjau apakah beban ini bisa ditekan atau dibuat bertahap"],"90");}
+  /* 8. stock coverage */
+  const s=stockOf(),daySoap=P.soap/P.elapsed;if(daySoap>0){const cov=s.soap/daySoap;
+    if(cov<14)add("bad","Stok sabun menipis",`Stok ${num(s.soap)} sabun cukup untuk ±${num(Math.floor(cov))} hari dengan rata-rata ${num(Math.round(daySoap))} sabun terjual per hari.`,["Pesan karton ke supplier sekarang (perhitungkan waktu kirim)"],"7");
+    else if(cov>75)add("info","Stok sabun berlebih",`Stok cukup untuk ±${num(Math.floor(cov))} hari. Modal tertahan di persediaan.`,["Tunda pembelian berikutnya","Dorong penjualan paket besar untuk memutar stok"],"30");}
+  /* 9. receivables */
+  if(!P.C){const R=receivables(endOf(P.m)),ar=MP.reduce((a,c)=>a+recvTotal(R,c),0);if(ar>g*0.3)add("info","Piutang marketplace besar",`Dana belum cair ${rp0(ar)} (${pc(ar/g)} dari omzet bulan ini).`,["Pantau pencairan rutin dan impor file income tiap hari","Rencanakan pembelian stok dari dana yang sudah cair saja"],"30");}
+  return F;
+}
+let perfMode="bulan",perfCh="Semua",perfDay="";
+V.perf=()=>{
+  const m=M(),P=perfData(m,perfCh),pc=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
+  const days=P.D.filter(x=>x.n&&x.date<=today()).map(x=>x.date);if(!days.includes(perfDay))perfDay=days[days.length-1]||"";
+  const chips=`<div class="chips">${[["bulan","Bulanan"],["hari","Harian"]].map(([k,l])=>`<button data-perfmode="${k}" aria-pressed="${perfMode===k}">${l}</button>`).join("")}</div>
+  <div class="chips">${["Semua",TT,SP].map(c=>`<button data-perfch="${c}" aria-pressed="${perfCh===c}">${c==="Semua"?"Semua channel":c}</button>`).join("")}
+  ${perfMode==="hari"?`<label class="hint" style="display:flex;gap:6px;align-items:center;margin-left:8px">Tanggal <select id="perfDay">${days.map(d=>`<option value="${d}" ${d===perfDay?"selected":""}>${fdate(d)}</option>`).join("")}</select></label>`:""}</div>`;
+  const head=`<div class="row"><h2>Analisa kinerja · ${perfMode==="hari"&&perfDay?fdate(perfDay):esc(mname(m))}</h2></div>${chips}`;
+  if(!P.g)return head+emptyBox(`Belum ada penjualan ${esc(mname(m))}`,"Impor file pesanan marketplace dulu.");
+  const kpi=(l,v,s,cls="")=>`<div class="kpi"><span>${l}</span><b class="${cls}">${v}</b><span>${s}</span></div>`;
+  const lvlPill={bad:'<span class="pill bad">Perlu tindakan</span>',warn:'<span class="pill warn">Perhatikan</span>',good:'<span class="pill good">Baik</span>',info:'<span class="pill">Info</span>'};
+  let body="";
+  if(perfMode==="hari"){
+    const x=P.D.find(d=>d.date===perfDay)||{};const prev=P.D.filter(d=>d.date<perfDay&&d.n),avg=k=>prev.length?prev.reduce((a,d)=>a+d[k],0)/prev.length:null;
+    const fixedDay=P.fixed/P.nDays,net=(x.profit||0)-fixedDay,beDay=P.be?P.be/P.nDays:null;
+    const wd=new Date(perfDay+"T00:00").getDay(),same=prev.filter(d=>new Date(d.date+"T00:00").getDay()===wd),sameAvg=same.length?same.reduce((a,d)=>a+d.gross,0)/same.length:null;
+    const cmp=(v,a)=>a?`<span class="${v>=a?"pos":"neg"}">${v>=a?"+":""}${pc((v-a)/a)}</span> vs rata-rata ${rp0(a)}`:"–";
+    body=`<div class="kpis">
+      ${kpi("Omzet kotor",rp(x.gross||0),`${num(x.n||0)} pesanan · ${cmp(x.gross||0,avg("gross"))}`)}
+      ${kpi("Laba setelah iklan",rp0(x.profit||0),`Margin ${pc(x.gross?x.profit/x.gross:null)}`,(x.profit||0)<0?"neg":"")}
+      ${kpi("ROAS",f2(x.roas),`Impas ${f2(x.be)} · ${x.roas&&x.be?(x.roas>=x.be?'<span class="pos">untung</span>':'<span class="neg">rugi</span>'):"data iklan belum ada"}`)}
+      ${P.C?kpi("TACOS",pc(x.tacos),`Iklan ${rp0(x.ads)} dari omzet`):kpi("Setelah beban tetap harian",rp0(net),`Beban tetap ${rp0(fixedDay)}/hari`,net<0?"neg":"")}
+    </div>
+    <div class="panel"><h3>Rincian hari ini</h3><div class="tbl"><table><tbody>
+      <tr><td>Omzet kotor</td><td class="n">${rp(x.gross||0)}</td><td class="hint">${sameAvg?`Hari yang sama minggu-minggu sebelumnya rata-rata ${rp0(sameAvg)}`:""}</td></tr>
+      <tr><td>Potongan marketplace & retur</td><td class="n neg">${rp0(-((x.fee||0)+(x.refund||0)))}</td><td class="hint">${pc(x.gross?((x.fee||0)+(x.refund||0))/x.gross:null)} dari omzet</td></tr>
+      <tr><td>HPP</td><td class="n neg">${rp0(-(x.hpp||0))}</td><td class="hint">${pc(x.gross?x.hpp/x.gross:null)}</td></tr>
+      <tr><td><b>Laba kotor (sebelum iklan)</b></td><td class="n"><b>${rp0(x.cm||0)}</b></td><td class="hint">Batas ACOS ${pc(x.acosBe)}</td></tr>
+      <tr><td>Biaya iklan</td><td class="n neg">${rp0(-(x.ads||0))}</td><td class="hint">ACOS ${pc(x.acos)} · biaya per pesanan iklan ${x.cpo?rp0(x.cpo):"–"} · CTR ${pc(x.ctr)}</td></tr>
+      <tr><td><b>Laba setelah iklan</b></td><td class="n"><b class="${(x.profit||0)<0?"neg":""}">${rp0(x.profit||0)}</b></td><td class="hint">ROI iklan ${pc(x.roi)} · AOV ${x.aov?rp0(x.aov):"–"}</td></tr>
+      ${P.C?"":`<tr><td>Bagian beban tetap per hari</td><td class="n neg">${rp0(-fixedDay)}</td><td class="hint">Beban tetap sebulan ${rp0(P.fixed)} ÷ ${P.nDays} hari</td></tr>
+      <tr><td><b>Perkiraan laba bersih hari ini</b></td><td class="n"><b class="${net<0?"neg":""}">${rp0(net)}</b></td><td class="hint">${beDay?`Omzet impas harian ±${rp0(beDay)}`:""}</td></tr>`}
+    </tbody></table></div></div>`;
+  }else{
+    const prevM=perfPrevM(m),Q=monthPL(prevM,P.C),dlt=(a,b)=>b?`<span class="${a>=b?"pos":"neg"}">${a>=b?"+":""}${pc((a-b)/b)}</span> vs ${mshort(prevM)}`:"";
+    body=`<div class="kpis">
+      ${kpi("Omzet kotor",rp(P.g),`${num(P.pl.count)} pesanan · AOV ${rp0(P.aov)} ${dlt(P.g,Q.gross)}`)}
+      ${kpi("Laba setelah iklan",rp0(P.var_),`Margin ${pc(P.vr)} · sebelum beban tetap`,P.var_<0?"neg":"")}
+      ${P.C?kpi("ROAS",f2(P.roas),`Impas ${f2(P.beRoas)} · TACOS ${pc(P.tacos)}`):kpi("Laba bersih",rp0(P.pl.net),`Margin ${pc(P.pl.net/P.g)} ${dlt(P.pl.net,Q.net)}`,P.pl.net<0?"neg":"")}
+      ${P.C?kpi("Sabun terjual",num(P.soap)+" pcs",`Rata-rata ${rp0(P.soapPrice)} per sabun`):kpi("Titik impas bulanan",P.be?rp0(P.be):"–",P.be?`≈ ${rp0(P.be/P.nDays)}/hari · tercapai ${pc(P.g/P.be)}`:"Margin setelah iklan belum positif")}
+    </div>
+    <div class="grid2">
+      <div class="panel"><h3>Rincian per Rp100 omzet</h3><div class="tbl"><table><tbody>
+        ${[["Omzet kotor",1,P.g],["Potongan marketplace & retur",-P.feeR,-(P.pl.fee+P.pl.refund+P.pl.adj)],["HPP produk",-P.hppR,-P.pl.hpp],["Laba kotor",P.cmr,P.pl.grossProfit,1],["Iklan + affiliate",-(P.tacos||0),-P.adsAll],["Laba setelah iklan",P.vr,P.var_,1],...(P.C?[]:[["Beban tetap & penyusutan",-(P.fixedAct/P.g),-P.fixedAct],["Pendapatan lain",P.pl.income/P.g,P.pl.income],["Laba bersih",P.pl.net/P.g,P.pl.net,1]])]
+          .map(([l,r,v,b])=>`<tr${b?' style="font-weight:700"':""}><td>${l}</td><td class="n ${r<0?"neg":""}">${r<0?"−":""}Rp${Math.abs(r*100).toFixed(1).replace(".",",")}</td><td class="n ${v<0?"neg":""}">${rp0(v)}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="hint">Iklan: ROAS ${f2(P.roas)} (impas ${f2(P.beRoas)}), ACOS ${pc(P.A.adsGmv?P.A.ads/P.A.adsGmv:null)}, biaya per pesanan iklan ${P.A.adsOrders?rp0(P.A.ads/P.A.adsOrders):"–"}, CTR ${pc(P.A.ctr)}. Pesanan batal ${pc(P.all?P.canc/P.all:null)}.</p></div>
+      ${P.C?`<div class="panel"><h3>Ringkasan ${esc(P.C)}</h3><p class="hint">Beban tetap dihitung di tampilan Semua channel.</p></div>`:`<div class="panel"><h3>Per channel</h3><div class="tbl"><table><thead><tr><th></th>${[TT,SP].map(c=>`<th class="n">${c}</th>`).join("")}</tr></thead><tbody>
+        ${(()=>{const X=[TT,SP].map(c=>perfData(m,c));const r=(l,f)=>`<tr><td>${l}</td>${X.map(q=>`<td class="n">${f(q)}</td>`).join("")}</tr>`;
+          return r("Omzet",q=>rp0(q.g))+r("Porsi omzet",q=>pc(P.g?q.g/P.g:null))+r("Pesanan · AOV",q=>`${num(q.pl.count)} · ${q.aov?rp0(q.aov):"–"}`)+r("Potongan marketplace",q=>pc(q.feeR))+r("Biaya iklan",q=>rp0(q.adsAll))+r("ROAS / impas",q=>q.roas?`${roasPill(q.roas,q.beRoas)} / ${f2(q.beRoas)}`:"–")+r("TACOS",q=>pc(q.tacos))+r("Laba setelah iklan",q=>`<span class="${q.var_<0?"neg":""}">${rp0(q.var_)}</span>`)+r("Margin setelah iklan",q=>pc(q.vr));})()}
+      </tbody></table></div></div>`}
+    </div>`;
+  }
+  /* SKU table */
+  const from=perfMode==="hari"?perfDay:m+"-01",to=perfMode==="hari"?perfDay:endOf(m);
+  const K=skuStats(m,perfCh,from,to).filter(r=>r.gross>0).sort((a,b)=>b.profit-a.profit);
+  body+=`<div class="panel"><h3>Kinerja per SKU</h3>${K.length?`<div class="tbl"><table><thead><tr><th>SKU</th><th class="n">Pcs</th><th class="n">Omzet</th><th class="n">Iklan (est.)</th><th class="n">ROAS / impas</th><th class="n">Laba setelah iklan</th><th class="n">Margin</th><th class="n">Laba / pesanan</th></tr></thead><tbody>
+    ${K.map(r=>`<tr><td>${esc(r.name)}</td><td class="n">${num(r.units)}</td><td class="n">${rp0(r.gross)}</td><td class="n mut">${rp0(r.ads)}</td><td class="n">${r.roas?roasPill(r.roas,r.be):"–"} <span class="mut">/ ${f2(r.be)}</span></td><td class="n ${r.profit<0?"neg":""}">${rp0(r.profit)}</td><td class="n">${pc(r.gross?r.profit/r.gross:null)}</td><td class="n">${r.n?rp0(r.profit/r.n):"–"}</td></tr>`).join("")}
+  </tbody></table></div><p class="hint">Biaya iklan per SKU adalah perkiraan: kampanye bernama "Isi N" dibebankan ke SKU itu, sisanya dibagi menurut porsi penjualan.</p>`:'<p class="hint">Belum ada penjualan.</p>'}</div>`;
+  /* indicator guide */
+  {const src=perfMode==="hari"?(P.D.find(d=>d.date===perfDay)||{}):{...P.A,gross:P.g,roas:P.roas,be:P.beRoas,roi:P.adsAll?P.var_/P.adsAll:null,acosBe:P.cmr,tacos:P.tacos};
+   const day=perfMode==="hari",ok=day&&src.ctr!=null;
+   body+=perfGlossary({roas:src.roas,be:src.be,roi:src.roi,acos:src.adsGmv?src.ads/src.adsGmv:null,acosBe:src.acosBe,tacos:src.tacos,ctr:day?(ok?src.ctr:null):P.A.ctr,cpc:day?(ok&&src.clicks?src.ads/src.clicks:null):P.A.cpc,cvr:day?(ok&&src.clicks?src.adsOrders/src.clicks:null):P.A.cvr});}
+  /* conclusions */
+  const Fd=perfFindings(P,perfMode,perfDay),order={bad:0,warn:1,good:2,info:3};Fd.sort((a,b)=>order[a.lvl]-order[b.lvl]);
+  body+=`<div class="panel"><h3>Kesimpulan & yang harus dilakukan</h3>${Fd.length?Fd.map(f=>`<div style="padding:10px 0;border-top:1px solid var(--line)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${lvlPill[f.lvl]}<b>${esc(f.title)}</b></div><p style="margin:6px 0">${f.text}</p>${f.acts.length?`<ul style="margin:4px 0 0 18px;padding:0">${f.acts.map(a=>`<li>${a}</li>`).join("")}</ul>`:""}</div>`).join(""):'<p class="hint">Belum cukup data untuk kesimpulan.</p>'}</div>`;
+  /* forward management (monthly, all channels) */
+  if(perfMode==="bulan"&&!P.C){
+    const sc=(l,dg,dads,dhpp)=>{const g2=P.projG*(1+dg),cm=g2*(P.cmr-(dhpp||0)*P.hppR),ads=P.projG?P.adsAll/P.g*P.projG*(1+(dads??dg)):0,n=cm-ads-P.fixed+P.pl.income*(P.nDays/P.elapsed);return`<tr><td>${l}</td><td class="n">${rp0(g2)}</td><td class="n ${n<0?"neg":""}">${rp0(n)}</td><td class="n">${pc(g2?n/g2:null)}</td></tr>`;};
+    const tgt=r=>P.vr>r?P.fixed/(P.vr-r):null;
+    const plan={"7":[],"30":[],"90":[]};for(const f of Fd)if(f.lvl!=="good"||f.horizon!=="7")for(const a of f.acts.slice(0,2))plan[f.horizon].push(a);
+    const s=stockOf(),share=P.g?Math.max(...[TT,SP].map(c=>(P.pl.perCh[c]||0)/P.g)):0;
+    plan["90"].push(`Siapkan dana cadangan minimal 3 bulan beban tetap (±${rp0(P.fixed*3)})`);
+    if(share>0.75)plan["90"].push(`Kurangi ketergantungan pada satu channel (${pc(share)} omzet dari satu marketplace): bangun Shopee/TikTok yang lebih lemah dan penjualan offline/reseller`);
+    plan["90"].push("Bangun pembeli ulang: kartu ucapan + voucher pembelian kedua di paket, follow-up pembeli lama");
+    plan["90"].push("Tinjau HPP tiap kuartal: negosiasi harga karton dan kemasan saat volume naik");
+    const uniq=a=>[...new Set(a)].slice(0,6);
+    body+=`<div class="panel"><h3>Proyeksi & manajemen ke depan</h3>
+      <div class="kpis">
+        ${kpi(P.complete?"Omzet bulan ini":"Proyeksi omzet akhir bulan",rp0(P.projG),P.complete?"Bulan sudah selesai":`Dari ${P.elapsed} hari berjalan, laju ${rp0(P.g/P.elapsed)}/hari`)}
+        ${kpi(P.complete?"Laba bersih":"Proyeksi laba bersih",rp0(P.projNet),`Margin ${pc(P.projG?P.projNet/P.projG:null)}`,P.projNet<0?"neg":"")}
+        ${kpi("Omzet untuk laba bersih 10%",tgt(0.1)?rp0(tgt(0.1)):"–",tgt(0.1)?`≈ ${rp0(tgt(0.1)/P.nDays)}/hari`:"Margin setelah iklan di bawah 10%")}
+        ${kpi("Omzet untuk laba bersih 15%",tgt(0.15)?rp0(tgt(0.15)):"–",tgt(0.15)?`≈ ${rp0(tgt(0.15)/P.nDays)}/hari`:"Margin setelah iklan di bawah 15%")}
+      </div>
+      <p class="hint">Beban tetap yang dipakai: ${rp0(P.fixed)} sebulan (${P.complete?"realisasi":`yang lebih besar antara realisasi ${rp0(P.fixedAct)} dan beban rutin + penyusutan ${rp0(P.fixedPlan)}`}). Isi daftar Beban rutin di tab Beban & Aset supaya titik impas akurat.</p>
+      <h3 style="margin-top:12px">Simulasi skenario (bulan penuh)</h3>
+      <div class="tbl"><table><thead><tr><th>Skenario</th><th class="n">Omzet</th><th class="n">Laba bersih</th><th class="n">Margin</th></tr></thead><tbody>
+        ${sc("Seperti sekarang",0)}${sc("Omzet +20% dengan ROAS sama",0.2)}${sc("Omzet +20%, iklan +40% (ROAS turun)",0.2,0.4)}${sc("Iklan −30%, omzet −10%",-0.1,-0.3)}${sc("HPP −10% (negosiasi supplier)",0,0,0.1)}${sc("Omzet −20%",-0.2)}
+      </tbody></table></div>
+      <h3 style="margin-top:12px">Rencana tindakan</h3>
+      <div class="grid2" style="grid-template-columns:repeat(3,1fr)">
+        ${[["7","7 hari ke depan"],["30","30 hari"],["90","3 bulan"]].map(([k,l])=>`<div><b>${l}</b><ul style="margin:6px 0 0 18px;padding:0">${uniq(plan[k]).map(a=>`<li>${a}</li>`).join("")||'<li class="mut">Tidak ada tindakan mendesak</li>'}</ul></div>`).join("")}
+      </div>
+      <p class="hint">Stok saat ini ${num(s.soap)} sabun. Proyeksi memakai laju harian bulan berjalan; angka berubah setiap ada data baru.</p>
+    </div>`;
+  }
+  return head+body;
+};
 
 V.price=()=>{
   const s=stockOf(),pl=monthPL(),prods=sortBy("products"),mats=sortBy("materials");
@@ -1659,7 +1845,7 @@ function render(){
 }
 document.getElementById("tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-tab]");if(!b)return;tab=b.dataset.tab;try{localStorage.setItem("kiso.tab",tab)}catch(_){}render();window.scrollTo(0,0);});
 monthSel.addEventListener("change",()=>{salesLimit=300;dailyDay="";render();});
-app.addEventListener("change",e=>{if(e.target.id==="dailyDay"){dailyDay=e.target.value;render();}});
+app.addEventListener("change",e=>{if(e.target.id==="dailyDay"){dailyDay=e.target.value;render();}if(e.target.id==="perfDay"){perfDay=e.target.value;render();}});
 app.addEventListener("click",async e=>{
   const b=e.target.closest("[data-team]");if(!b)return;const a=b.dataset.team,id=b.dataset.id;
   try{
@@ -1677,6 +1863,8 @@ app.addEventListener("click",e=>{
   const ch=t.closest("[data-chan]");if(ch){salesFilter=ch.dataset.chan;render();return;}
   const adc=t.closest("[data-adsch]");if(adc){adsCh=adc.dataset.adsch;render();return;}
   const dch=t.closest("[data-dailych]");if(dch){dailyCh=dch.dataset.dailych;render();return;}
+  const pfm=t.closest("[data-perfmode]");if(pfm){perfMode=pfm.dataset.perfmode;render();return;}
+  const pfc=t.closest("[data-perfch]");if(pfc){perfCh=pfc.dataset.perfch;render();return;}
   const au=t.closest("[data-auduser]");if(au){audUser=au.dataset.auduser;render();return;}
   const dsk=t.closest("[data-skusort]");if(dsk){skuSort=dsk.dataset.skusort;render();return;}
   const ac=t.closest("[data-acc]");if(ac){bankAcc=ac.dataset.acc;render();return;}
