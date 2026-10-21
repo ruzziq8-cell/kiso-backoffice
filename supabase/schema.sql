@@ -47,7 +47,7 @@ drop policy if exists docs_read on public.docs;
 drop policy if exists docs_insert on public.docs;
 drop policy if exists docs_update on public.docs;
 drop policy if exists docs_delete on public.docs;
-create policy docs_read   on public.docs for select using (public.my_role() is not null);
+create policy docs_read   on public.docs for select using (public.my_role() is not null and (coll <> 'customers' or public.my_role() in ('ceo','admin','pemilik')));
 create policy docs_insert on public.docs for insert with check (public.can_write(coll));
 create policy docs_update on public.docs for update using (public.can_write(coll)) with check (public.can_write(coll));
 create policy docs_delete on public.docs for delete using (public.can_write(coll));
