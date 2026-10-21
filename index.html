@@ -979,17 +979,26 @@ V.perf=()=>{
   /* conclusions */
   const Fd=perfFindings(P,perfMode,perfDay),order={bad:0,warn:1,good:2,info:3};Fd.sort((a,b)=>order[a.lvl]-order[b.lvl]);
   body+=`<div class="panel"><h3>Kesimpulan & yang harus dilakukan</h3>${Fd.length?Fd.map(f=>`<div style="padding:10px 0;border-top:1px solid var(--line)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${lvlPill[f.lvl]}<b>${esc(f.title)}</b></div><p style="margin:6px 0">${f.text}</p>${f.acts.length?`<ul style="margin:4px 0 0 18px;padding:0">${f.acts.map(a=>`<li>${a}</li>`).join("")}</ul>`:""}</div>`).join(""):'<p class="hint">Belum cukup data untuk kesimpulan.</p>'}</div>`;
+  /* customers */
+  let CR=null;
+  if(perfMode==="bulan"&&CUST_OK()&&S.customers.length){const X=custStats(m,perfCh);if(X.inM.length){CR=custReport(m,perfCh,X);
+    body+=`<div class="kpis" style="margin-top:4px">
+      ${kpi("Pembeli bulan ini",num(X.inM.length),`${num(X.newB.length)} pembeli baru`)}
+      ${kpi("Pembeli repeat",num(X.rep.length),`Repeat rate ${pc(X.rate)}`)}
+      ${kpi("Omzet dari pembeli repeat",rp0(X.GR),`${pc(X.G?X.GR/X.G:null)} omzet pembeli`)}
+      ${kpi("Jarak beli ke-1 → ke-2",X.gapMed!=null?`${num(X.gapMed)} hari`:"–","Median")}</div>${CR.html}`;}}
   /* forward management (monthly, all channels) */
   if(perfMode==="bulan"&&!P.C){
     const sc=(l,dg,dads,dhpp)=>{const g2=P.projG*(1+dg),cm=g2*(P.cmr+(dhpp||0)*P.hppR),ads=P.projG?P.adsAll/P.g*P.projG*(1+(dads??dg)):0,n=cm-ads-P.fixed+P.pl.income*(P.nDays/P.elapsed);return`<tr><td>${l}</td><td class="n">${rp0(g2)}</td><td class="n ${n<0?"neg":""}">${rp0(n)}</td><td class="n">${pc(g2?n/g2:null)}</td></tr>`;};
     const tgt=r=>P.vr>r?P.fixed/(P.vr-r):null;
-    const plan={"7":[],"30":[],"90":[]};for(const f of Fd)if(f.lvl!=="good"||f.horizon!=="7")for(const a of f.acts.slice(0,2))plan[f.horizon].push(a);
+    const plan={"7":[],"30":[],"90":[]};for(const f of Fd)if((f.lvl!=="good"||f.horizon!=="7")&&!(CR&&/pembeli repeat/i.test(f.title)))for(const a of f.acts.slice(0,2))plan[f.horizon].push(a);
+    if(CR)for(const k in CR.acts)plan[k].push(...CR.acts[k]);
     const s=stockOf(),share=P.g?Math.max(...[TT,SP].map(c=>(P.pl.perCh[c]||0)/P.g)):0;
     plan["90"].push(`Siapkan dana cadangan minimal 3 bulan beban tetap (±${rp0(P.fixed*3)})`);
     if(share>0.75)plan["90"].push(`Kurangi ketergantungan pada satu channel (${pc(share)} omzet dari satu marketplace): bangun Shopee/TikTok yang lebih lemah dan penjualan offline/reseller`);
-    plan["90"].push("Bangun pembeli ulang: kartu ucapan + voucher pembelian kedua di paket, follow-up pembeli lama");
+    if(!CR)plan["90"].push("Bangun pembeli ulang: kartu ucapan + voucher pembelian kedua di paket, follow-up pembeli lama");
     plan["90"].push("Tinjau HPP tiap kuartal: negosiasi harga karton dan kemasan saat volume naik");
-    const uniq=a=>[...new Set(a)].slice(0,6);
+    const uniq=a=>[...new Set(a)].slice(0,8);
     body+=`<div class="panel"><h3>Proyeksi & manajemen ke depan</h3>
       <div class="kpis">
         ${kpi(P.complete?"Omzet bulan ini":"Proyeksi omzet akhir bulan",rp0(P.projG),P.complete?"Bulan sudah selesai":`Dari ${P.elapsed} hari berjalan, laju ${rp0(P.g/P.elapsed)}/hari`)}
@@ -1055,6 +1064,7 @@ V.cust=()=>{
   const sorters={cnt:(a,b)=>b.cnt-a.cnt||b.gross-a.gross,gross:(a,b)=>b.gross-a.gross,last:(a,b)=>b.last.localeCompare(a.last)};list.sort(sorters[custSort]);
   const total=list.length;list=list.slice(0,300);
   const sb=(k,l)=>`<button data-custsort="${k}" aria-pressed="${custSort===k}">${l}</button>`;
+  const REP=custReport(m,custCh,X);
   return`${head}
   <div class="kpis">
     ${kpi("Pembeli bulan ini",num(X.inM.length),`${num(X.newB.length)} pembeli baru · ${num(X.inM.length-X.newB.length)} pembeli lama`)}
@@ -1062,11 +1072,12 @@ V.cust=()=>{
     ${kpi("Omzet dari pembeli repeat",rp0(X.GR),`${pc(X.G?X.GR/X.G:null)} dari omzet pembeli bulan ini`)}
     ${kpi("Jarak beli ke-1 → ke-2",X.gapMed!=null?`${num(X.gapMed)} hari`:"–",X.gapAvg!=null?`Median · rata-rata ${X.gapAvg.toFixed(1).replace(".",",")} hari`:"Belum ada pembeli repeat")}
   </div>
+  ${REP.html}
   <div class="grid2">
-    <div class="panel"><h3>Jumlah pembelian per pembeli</h3><div class="tbl"><table><thead><tr><th>Beli</th><th class="n">Pembeli</th><th class="n">Porsi</th></tr></thead><tbody>
+    <div class="panel" style="align-content:start"><h3>Jumlah pembelian per pembeli</h3><div class="tbl"><table><thead><tr><th>Beli</th><th class="n">Pembeli</th><th class="n">Porsi</th></tr></thead><tbody>
       ${["1","2","3","4+"].map(b=>`<tr><td>${b} kali</td><td class="n">${num(dist[b]||0)}</td><td class="n">${pc(X.inM.length?(dist[b]||0)/X.inM.length:null)}</td></tr>`).join("")}</tbody></table></div>
       <p class="hint">Dihitung dari semua pesanan sampai akhir ${esc(mname(m))}, tanpa pesanan batal dan belum dibayar. Pembeli TikTok dan Shopee dihitung terpisah; pembeli dikenali dari username + kota.</p></div>
-    <div class="panel"><h3>Pembeli repeat</h3>
+    <div class="panel" style="align-content:start"><h3>Pembeli repeat</h3>
       <div class="tbl"><table><thead><tr><th>Kota terbanyak</th><th class="n">Pembeli</th></tr></thead><tbody>${Object.entries(cityR).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${num(v)}</td></tr>`).join("")||'<tr><td class="mut">–</td><td></td></tr>'}</tbody></table></div>
       <div class="tbl" style="margin-top:8px"><table><thead><tr><th>Produk yang dibeli</th><th class="n">Pembeli repeat</th></tr></thead><tbody>${Object.entries(skuFirst).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${num(v)}</td></tr>`).join("")||'<tr><td class="mut">–</td><td></td></tr>'}</tbody></table></div></div>
   </div>
@@ -1078,8 +1089,58 @@ V.cust=()=>{
     ${list.map(c=>`<tr><td><b>${esc(c.n||"–")}</b><div class="hint">${esc(c.u||"")}</div></td><td>${esc(c.ch)}</td><td>${esc(c.p||"–")}</td><td class="wrapcell">${esc([c.c,c.v].filter(Boolean).join(", "))}${c.a?`<div class="hint">${esc(c.a)}</div>`:""}</td>
       <td class="n">${c.cnt>1?`<span class="pill good">${num(c.cnt)}×</span>`:num(c.cnt)}</td><td class="n">${rp0(c.gross)}</td><td>${fdate(c.first)}</td><td>${fdate(c.last)}</td><td class="wrapcell">${Object.entries(c.sku).map(([k,v])=>`${esc(k)} ×${num(v)}`).join(", ")}</td></tr>`).join("")}
     </tbody></table></div><p class="hint">${num(total)} pelanggan${total>300?" (ditampilkan 300 teratas)":""}. Nama dan nomor HP tampil sesuai yang diberikan marketplace (sebagian disamarkan oleh TikTok/Shopee).</p></div>
-  ${custAdvice(X)}`;
+`;
 };
+/* narrative + repeat-order playbook, shared by Pelanggan and Analisa Kinerja */
+function custReport(m,ch,X){
+  X=X||custStats(m,ch);const pc=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
+  if(!X.inM.length)return{html:"",acts:{}};
+  const end=endOf(m),dist={};for(const c of X.inM){const n=c.orders.filter(o=>o.date<=end).length;dist[n]=(dist[n]||0)+1;}
+  const dTxt=Object.entries(dist).filter(([n])=>+n>1).sort((a,b)=>a[0]-b[0]).map(([n,v])=>`${num(v)} orang beli ${n}×`).join(", ");
+  const prodR={};for(const c of X.rep)for(const k of Object.keys(c.sku))prodR[k]=(prodR[k]||0)+1;const topP=Object.entries(prodR).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const cityR={};for(const c of X.rep){const k=(c.c||"").replace(/^(Kab\.|Kabupaten|Kota)\s*/i,"");if(k)cityR[k]=(cityR[k]||0)+1;}const topC=Object.entries(cityR).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const repOrders=X.rep.reduce((a,c)=>a+c.orders.filter(o=>o.date>=m+"-01"&&o.date<=end).length,0),aovR=repOrders?X.GR/repOrders:null;
+  const chRates=ch==="Semua"?[TT,SP].map(c=>{const Y=custStats(m,c);return Y.inM.length?`${c} ${pc(Y.rate)} (${num(Y.rep.length)} dari ${num(Y.inM.length)})`:null;}).filter(Boolean):[];
+  const P=perfData(m,ch),gap=X.gapMed;
+  const level=X.rate==null?"":X.rate<0.1?"rendah":X.rate<0.2?"cukup":"baik";
+  const proj=t=>X.rate<t?{t,extra:(t-X.rate)*X.inM.length*(aovR||P.aov||0)}:null,pj=[proj(0.1),proj(0.15),proj(0.2)].filter(Boolean);
+  /* follow-up list: one-time buyers whose first order was gap-3 … gap+14 days ago */
+  const T0=today(),gg=gap??14,g0=Math.max(3,gg-3),g1=gg+7,dsince=d=>mdays(d,T0)-1;
+  const fu=X.L.filter(c=>c.cnt===1&&dsince(c.first)>=g0&&dsince(c.first)<=g1).sort((a,b)=>Math.abs(dsince(a.first)-gg)-Math.abs(dsince(b.first)-gg)||b.gross-a.gross);
+  const small=X.inM.filter(c=>Object.keys(c.sku).some(k=>/isi [12]$/i.test(k))).length;
+  const pts=[
+    `Bulan ini ada <b>${num(X.inM.length)} pembeli</b> (${num(X.newB.length)} baru). <b>${num(X.rep.length)} pembeli (${pc(X.rate)})</b> sudah membeli lebih dari sekali${dTxt?`: ${dTxt}`:""}. Repeat rate ini tergolong <b>${level}</b>; toko perawatan kulit yang sehat biasanya 15–30%.`,
+    chRates.length?`Per channel: ${chRates.join(" · ")}.`:"",
+    `Pembeli repeat menyumbang <b>${rp0(X.GR)} (${pc(X.G?X.GR/X.G:null)})</b> omzet pembeli bulan ini${aovR?`, dengan rata-rata ${rp0(aovR)} per pesanan`:""}. Sisanya ${pc(X.G?1-X.GR/X.G:null)} masih dari pembeli pertama kali, yang hampir semuanya didatangkan iklan (TACOS ${pc(P.tacos)}).`,
+    gap!=null?`Jarak dari pembelian pertama ke kedua: <b>median ${num(gap)} hari</b> (rata-rata ${X.gapAvg.toFixed(1).replace(".",",")} hari). Ini waktu terbaik untuk mengingatkan pembeli.`:"",
+    topP.length?`Produk yang dibeli pembeli repeat terbanyak: ${topP.map(([k,v])=>`${esc(k)} (${num(v)})`).join(", ")}. ${num(small)} pembeli bulan ini membeli isi 1/isi 2, yaitu kandidat untuk ditawari paket lebih besar.`:"",
+    topC.length?`Kota asal pembeli repeat terbanyak: ${topC.map(([k,v])=>`${esc(k)} (${num(v)})`).join(", ")}.`:"",
+    "Pesanan batal dan belum dibayar tidak dihitung; pembeli dikenali dari username + kota, dan pembeli TikTok dan Shopee dihitung terpisah. Riwayat baru dimulai 1 Oktober, jadi repeat rate akan naik dengan sendirinya seiring bertambahnya bulan.",
+  ].filter(Boolean);
+  const plays=[
+    ["Kartu + voucher pembelian kedua di setiap paket","Selipkan kartu terima kasih berisi cara pakai, ajakan follow toko, dan kode voucher toko khusus pembelian berikutnya (mis. potongan Rp5.000 atau gratis ongkir, berlaku 30 hari). Gunakan voucher di dalam marketplace, jangan arahkan pembeli bertransaksi di luar marketplace (melanggar aturan TikTok/Shopee).",`Kenaikan repeat rate`, "7"],
+    ["Pengingat di hari yang tepat",gap!=null?`Kirim chat toko/broadcast ke pembeli sekitar hari ke-${num(Math.max(3,gap-3))} sampai ke-${num(gap+3)} setelah pembelian pertama, berisi tips pemakaian + voucher. Daftar pembeli yang sedang masuk jendela ini ada di bawah (${num(fu.length)} orang).`:"Kirim chat toko 2–3 minggu setelah barang diterima, berisi tips pemakaian + voucher.","Pembeli kembali sebelum lupa","7"],
+    ["Naikkan paket, bukan hanya frekuensi",`Pembeli isi 1/isi 2 yang puas adalah calon pembeli isi 3–4. Buat harga paket isi 3–4 terasa lebih hemat per sabun dan tawarkan lewat voucher minimal belanja. Paket besar juga lebih untung per pesanan.`,"AOV dan laba per pesanan naik","30"],
+    ["Minta ulasan dengan foto","Ulasan foto/video dari pembeli lama menaikkan konversi (CVR) dan menurunkan biaya iklan per pesanan. Tawarkan koin/voucher kecil untuk ulasan dengan foto.","CVR naik, TACOS turun","30"],
+    ["Konten edukasi untuk pengikut","Rutin LIVE dan video edukasi (hasil pemakaian 2–4 minggu, cara pakai) dengan voucher khusus pengikut. Pembeli lama yang mengikuti toko akan melihatnya tanpa biaya iklan.","Penjualan organik","30"],
+    ["Program pelanggan setia",`Beri hadiah untuk pembelian ke-3 (mis. bonus 1 sabun atau voucher lebih besar). ${num(X.L.filter(c=>c.cnt>=2).length)} pelanggan sudah membeli ≥2 kali dan bisa jadi target pertama.`,"Pelanggan bertahan lebih lama","90"],
+  ];
+  const html=`<div class="panel"><h3>Pembahasan pelanggan & repeat order</h3><ul style="margin:0 0 0 18px;padding:0;display:grid;gap:6px">${pts.map(p=>`<li>${p}</li>`).join("")}</ul>
+    ${pj.length?`<h3 style="margin-top:14px">Potensi kalau repeat rate dinaikkan</h3><div class="tbl"><table><thead><tr><th>Target repeat rate</th><th class="n">Tambahan pembeli repeat</th><th class="n">Tambahan omzet / bulan</th><th class="n">Tambahan laba (tanpa biaya iklan)</th></tr></thead><tbody>
+      ${pj.map(p=>`<tr><td>${pc(p.t)}</td><td class="n">${num(Math.round((p.t-X.rate)*X.inM.length))}</td><td class="n">${rp0(p.extra)}</td><td class="n">${rp0(p.extra*P.cmr)}</td></tr>`).join("")}
+    </tbody></table></div><p class="hint">Dihitung dari jumlah pembeli bulan ini × rata-rata nilai pesanan pembeli repeat. Laba memakai margin kotor ${pc(P.cmr)} karena pembeli lama yang kembali sendiri tidak perlu dibayar dengan iklan.</p>`:""}
+    <h3 style="margin-top:14px">Cara meningkatkan repeat order</h3>
+    <div class="tbl"><table><thead><tr><th>Langkah</th><th>Caranya</th><th>Dampak</th><th>Waktu</th></tr></thead><tbody>
+      ${plays.map(([a,b,c,d])=>`<tr><td><b>${a}</b></td><td class="wrapcell">${b}</td><td class="wrapcell">${c}</td><td>${d==="7"?"Minggu ini":d==="30"?"Bulan ini":"3 bulan"}</td></tr>`).join("")}
+    </tbody></table></div>
+    <h3 style="margin-top:14px">Daftar follow-up sekarang (${num(fu.length)} pembeli)</h3>
+    ${fu.length?`<p class="hint">Pembeli yang baru sekali beli, ${num(g0)}–${num(g1)} hari lalu (sekitar jarak beli ulang pembeli lain), diurutkan dari yang paling pas waktunya. Kirim chat toko + voucher.</p><div class="tbl"><table><thead><tr><th>Pelanggan</th><th>Channel</th><th>Kontak</th><th>Kota</th><th>Beli</th><th class="n">Hari lalu</th><th>Produk</th></tr></thead><tbody>
+      ${fu.slice(0,60).map(c=>`<tr><td><b>${esc(c.n||"–")}</b><div class="hint">${esc(c.u||"")}</div></td><td>${esc(c.ch)}</td><td>${esc(c.p||"–")}</td><td>${esc(c.c||"")}</td><td>${fdate(c.first)}</td><td class="n">${num(dsince(c.first))}</td><td class="wrapcell">${Object.entries(c.sku).map(([k,v])=>`${esc(k)} ×${num(v)}`).join(", ")}</td></tr>`).join("")}
+    </tbody></table></div>${fu.length>60?`<p class="hint">Ditampilkan 60 dari ${num(fu.length)}; daftar lengkap ada di modul Pelanggan.</p>`:""}`:'<p class="hint">Belum ada pembeli yang masuk jendela follow-up.</p>'}
+  </div>`;
+  return{html,fu,acts:{"7":[`Follow-up ${num(fu.length)} pembeli yang masuk jendela beli ulang (daftar di modul Pelanggan)`,"Mulai selipkan kartu + voucher pembelian kedua di setiap paket"],"30":["Dorong pembeli isi 1/isi 2 ke paket isi 3–4 lewat voucher minimal belanja","Kumpulkan ulasan foto dari pembeli lama"],"90":["Jalankan program pelanggan setia (hadiah pembelian ke-3)"]}};
+}
+
 function custAdvice(X){
   const pc=v=>v==null?"–":(v*100).toFixed(1).replace(".",",")+"%",A=[];
   if(X.rate!=null&&X.rate<0.1)A.push(`Repeat rate ${pc(X.rate)} masih rendah (toko perawatan kulit yang sehat biasanya 15–30%). Sisipkan kartu terima kasih + voucher pembelian kedua di setiap paket.`);
