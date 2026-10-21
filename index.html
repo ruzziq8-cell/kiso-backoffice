@@ -170,6 +170,7 @@ dialog form{display:grid;gap:14px;padding:18px}
       <button role="tab" data-tab="dash">Dashboard</button>
       <button role="tab" data-tab="daily">Laporan Harian</button>
       <button role="tab" data-tab="perf">Analisa Kinerja</button>
+      <button role="tab" data-tab="cust">Pelanggan</button>
       <button role="tab" data-tab="sales">Penjualan</button>
       <button role="tab" data-tab="buy">Pembelian</button>
       <button role="tab" data-tab="ap">Hutang</button>
@@ -235,7 +236,7 @@ function shopeeAdsSet(){
 const mdays=(a,b)=>Math.round((new Date(b+"T00:00")-new Date(a+"T00:00"))/864e5)+1;
 /* ad spend of a period report attributed to a month in proportion to the days that fall in it */
 function shopeeAdSpend(m){const a=m+"-01",b=endOf(m);let t=0;for(const r of shopeeAdsSet()){const f=r.from>a?r.from:a,e=r.to<b?r.to:b;if(f<=e)t+=r.spend*mdays(f,e)/r.len;}return t;}
-const COLLS=["products","materials","production","orders","purchases","cash","moves","accounts","transfers","receipts","recurring","orderdays","settles","adsdaily","adsreports","returns","supreturns","suppliers","appay","apopen"];
+const COLLS=["customers","products","materials","production","orders","purchases","cash","moves","accounts","transfers","receipts","recurring","orderdays","settles","adsdaily","adsreports","returns","supreturns","suppliers","appay","apopen"];
 
 const S={settings:{storeName:"KISO.ID"},loaded:{},db:null,canWrite:true,team:[],teamreq:[]};
 COLLS.forEach(c=>S[c]=[]);
@@ -254,7 +255,7 @@ document.getElementById("themeBtn")?.addEventListener("click",()=>{const i=THEME
    Write protection for view-only accounts is enforced by claude.ai; module hiding for editors is a display rule. ---------- */
 const ROLES={
   ceo:{name:"CEO",tabs:"*",write:true,desc:"Melihat dan mengubah semua modul"},
-  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","stock","sales","buy","ap","price","cost","bank","ar","ads","report"],write:true,desc:"Melihat dan mengubah modul keuangan (Dashboard, Laporan Harian, Analisa Kinerja, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
+  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","ads","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
   gudang:{name:"Gudang",tabs:["stock"],write:true,desc:"Hanya modul Stok (melihat dan mengubah)"},
   pemilik:{name:"Pemilik",tabs:"*",write:false,desc:"Melihat semua modul, tidak bisa mengubah apa pun"},
 };
@@ -904,6 +905,10 @@ function perfFindings(P,mode,day){
   const s=stockOf(),daySoap=P.soap/P.elapsed;if(daySoap>0){const cov=s.soap/daySoap;
     if(cov<14)add("bad","Stok sabun menipis",`Stok ${num(s.soap)} sabun cukup untuk ±${num(Math.floor(cov))} hari dengan rata-rata ${num(Math.round(daySoap))} sabun terjual per hari.`,["Pesan karton ke supplier sekarang (perhitungkan waktu kirim)"],"7");
     else if(cov>75)add("info","Stok sabun berlebih",`Stok cukup untuk ±${num(Math.floor(cov))} hari. Modal tertahan di persediaan.`,["Tunda pembelian berikutnya","Dorong penjualan paket besar untuk memutar stok"],"30");}
+  /* repeat buyers */
+  if(mode==="bulan"&&CUST_OK()&&S.customers.length){const X=custStats(P.m,P.ch);if(X.inM.length>=30){
+    if(X.rate<0.1)add("warn","Pembeli repeat masih sedikit",`Hanya ${pc(X.rate)} pembeli bulan ini yang sudah membeli ≥2 kali; omzet dari mereka ${pc(X.G?X.GR/X.G:null)}. Hampir semua penjualan harus "dibeli" lewat iklan.`,["Sisipkan kartu + voucher pembelian kedua di setiap paket",X.gapMed!=null?`Kirim pengingat/voucher sekitar ${num(X.gapMed)} hari setelah pembelian pertama`:"Follow-up pembeli lewat chat toko 2–3 minggu setelah barang diterima","Lihat daftar pembeli setia di modul Pelanggan"],"30");
+    else add("good","Pembeli repeat sehat",`${pc(X.rate)} pembeli bulan ini sudah membeli ≥2 kali, menyumbang ${pc(X.G?X.GR/X.G:null)} omzet mereka.`,["Pertahankan program pembeli ulang dan tawarkan paket lebih besar ke mereka"],"90");}}
   /* 9. receivables */
   if(!P.C){const R=receivables(endOf(P.m)),ar=MP.reduce((a,c)=>a+recvTotal(R,c),0);if(ar>g*0.3)add("info","Piutang marketplace besar",`Dana belum cair ${rp0(ar)} (${pc(ar/g)} dari omzet bulan ini).`,["Pantau pencairan rutin dan impor file income tiap hari","Rencanakan pembelian stok dari dana yang sudah cair saja"],"30");}
   return F;
@@ -1006,6 +1011,83 @@ V.perf=()=>{
   }
   return head+body;
 };
+
+/* ---------- Pelanggan: buyers and repeat orders. Buyer details live in the "customers" collection, which the database only lets CEO, Pemilik and Admin read ---------- */
+const CUST_OK=()=>ME.owner||!ME.role||["ceo","pemilik","admin"].includes(ME.role);
+const custKey=(ch,r)=>{const u=clean(r.u).toLowerCase();return ch+"|"+(u?u+"|"+clean(r.c).toLowerCase():(clean(r.p)+"|"+clean(r.n)+"|"+clean(r.c)).toLowerCase());};
+function custIndex(){
+  const info=new Map();for(const d of S.customers)for(const r of d.list||[])info.set(d.ch+"|"+r.i,{ch:d.ch,...r});
+  const C=new Map(),pm=pmap();
+  for(const o of ORD()){if(!o.imported||!counts(o))continue;const r=info.get(o.channel+"|"+o.ref);if(!r)continue;
+    const k=custKey(o.channel,r),t=orderTotals(o);let c=C.get(k);
+    if(!c){c={k,ch:o.channel,u:r.u,n:r.n,p:r.p,c:r.c,v:r.v,a:r.a,orders:[],gross:0,sku:{}};C.set(k,c);}
+    c.orders.push({date:o.date,gross:t.gross,ref:o.ref});c.gross+=t.gross;if(r.n)c.n=r.n;if(r.p)c.p=r.p;if(r.a)c.a=r.a;
+    for(const it of o.items||[]){const nm=pname(it.productId,pm);c.sku[nm]=(c.sku[nm]||0)+(+it.qty||0);}}
+  for(const c of C.values()){c.orders.sort((a,b)=>a.date.localeCompare(b.date));c.first=c.orders[0].date;c.last=c.orders[c.orders.length-1].date;c.cnt=c.orders.length;
+    c.gap=c.cnt>1?mdays(c.orders[0].date,c.orders[1].date)-1:null;}
+  return{C:[...C.values()],matched:info.size};
+}
+function custStats(m,ch){
+  const {C}=custIndex(),end=endOf(m),start=m+"-01",L=C.filter(c=>ch==="Semua"||c.ch===ch);
+  const inM=L.filter(c=>c.orders.some(o=>o.date>=start&&o.date<=end));
+  const upto=c=>c.orders.filter(o=>o.date<=end);
+  const rep=inM.filter(c=>upto(c).length>1),newB=inM.filter(c=>c.first>=start);
+  const gM=c=>c.orders.filter(o=>o.date>=start&&o.date<=end).reduce((a,o)=>a+o.gross,0);
+  const G=inM.reduce((a,c)=>a+gM(c),0),GR=rep.reduce((a,c)=>a+gM(c),0);
+  const gaps=L.map(c=>c.gap).filter(x=>x!=null);
+  return{L,inM,rep,newB,G,GR,rate:inM.length?rep.length/inM.length:null,gapAvg:gaps.length?gaps.reduce((a,b)=>a+b,0)/gaps.length:null,
+    gapMed:gaps.length?gaps.sort((a,b)=>a-b)[Math.floor(gaps.length/2)]:null,ordersM:inM.reduce((a,c)=>a+upto(c).filter(o=>o.date>=start).length,0)};
+}
+let custCh="Semua",custQ="",custSort="cnt",custAll=false;
+V.cust=()=>{
+  const m=M(),pc=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
+  const head=`<div class="row"><h2>Pelanggan · ${esc(mname(m))}</h2></div>
+  <div class="chips">${["Semua",TT,SP].map(c=>`<button data-custch="${c}" aria-pressed="${custCh===c}">${c==="Semua"?"Semua channel":c}</button>`).join("")}</div>`;
+  if(!CUST_OK())return head+emptyBox("Tidak ada akses","Data pelanggan hanya bisa dibuka CEO, Pemilik, dan Admin.");
+  const X=custStats(m,custCh);
+  if(!X.L.length)return head+emptyBox("Belum ada data pelanggan","Impor ulang file pesanan (TikTok Semua pesanan / Shopee Order.all). Data pembeli dibaca dari file itu.");
+  const kpi=(l,v,s)=>`<div class="kpi"><span>${l}</span><b>${v}</b><span>${s}</span></div>`;
+  const dist={};for(const c of X.inM){const n=c.orders.filter(o=>o.date<=endOf(m)).length,b=n>=4?"4+":String(n);dist[b]=(dist[b]||0)+1;}
+  const cityR={};for(const c of X.rep){const k=c.c||"(tanpa kota)";cityR[k]=(cityR[k]||0)+1;}
+  const skuFirst={};for(const c of X.rep){for(const [k,v] of Object.entries(c.sku))skuFirst[k]=(skuFirst[k]||0)+1;}
+  const q=custQ.trim().toLowerCase();
+  let list=(custAll?X.L:X.inM).filter(c=>!q||[c.u,c.n,c.p,c.c,c.v,c.a].some(v=>(v||"").toLowerCase().includes(q)));
+  const sorters={cnt:(a,b)=>b.cnt-a.cnt||b.gross-a.gross,gross:(a,b)=>b.gross-a.gross,last:(a,b)=>b.last.localeCompare(a.last)};list.sort(sorters[custSort]);
+  const total=list.length;list=list.slice(0,300);
+  const sb=(k,l)=>`<button data-custsort="${k}" aria-pressed="${custSort===k}">${l}</button>`;
+  return`${head}
+  <div class="kpis">
+    ${kpi("Pembeli bulan ini",num(X.inM.length),`${num(X.newB.length)} pembeli baru · ${num(X.inM.length-X.newB.length)} pembeli lama`)}
+    ${kpi("Pembeli repeat",num(X.rep.length),`Repeat rate ${pc(X.rate)} (sudah beli ≥2 kali)`)}
+    ${kpi("Omzet dari pembeli repeat",rp0(X.GR),`${pc(X.G?X.GR/X.G:null)} dari omzet pembeli bulan ini`)}
+    ${kpi("Jarak beli ke-1 → ke-2",X.gapMed!=null?`${num(X.gapMed)} hari`:"–",X.gapAvg!=null?`Median · rata-rata ${X.gapAvg.toFixed(1).replace(".",",")} hari`:"Belum ada pembeli repeat")}
+  </div>
+  <div class="grid2">
+    <div class="panel"><h3>Jumlah pembelian per pembeli</h3><div class="tbl"><table><thead><tr><th>Beli</th><th class="n">Pembeli</th><th class="n">Porsi</th></tr></thead><tbody>
+      ${["1","2","3","4+"].map(b=>`<tr><td>${b} kali</td><td class="n">${num(dist[b]||0)}</td><td class="n">${pc(X.inM.length?(dist[b]||0)/X.inM.length:null)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="hint">Dihitung dari semua pesanan sampai akhir ${esc(mname(m))}, tanpa pesanan batal dan belum dibayar. Pembeli TikTok dan Shopee dihitung terpisah; pembeli dikenali dari username + kota.</p></div>
+    <div class="panel"><h3>Pembeli repeat</h3>
+      <div class="tbl"><table><thead><tr><th>Kota terbanyak</th><th class="n">Pembeli</th></tr></thead><tbody>${Object.entries(cityR).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${num(v)}</td></tr>`).join("")||'<tr><td class="mut">–</td><td></td></tr>'}</tbody></table></div>
+      <div class="tbl" style="margin-top:8px"><table><thead><tr><th>Produk yang dibeli</th><th class="n">Pembeli repeat</th></tr></thead><tbody>${Object.entries(skuFirst).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${num(v)}</td></tr>`).join("")||'<tr><td class="mut">–</td><td></td></tr>'}</tbody></table></div></div>
+  </div>
+  <div class="panel"><div class="row"><h3>Daftar pelanggan</h3><div class="sp"></div>
+    <input id="custQ" type="search" placeholder="Cari nama, username, HP, kota…" value="${esc(custQ)}" style="max-width:240px">
+    <label class="hint" style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="custAll" ${custAll?"checked":""}> semua bulan</label></div>
+    <div class="chips">${sb("cnt","Paling sering beli")}${sb("gross","Belanja terbesar")}${sb("last","Terbaru")}</div>
+    <div class="tbl"><table><thead><tr><th>Pelanggan</th><th>Channel</th><th>Kontak</th><th>Kota / alamat</th><th class="n">Pesanan</th><th class="n">Total belanja</th><th>Pertama</th><th>Terakhir</th><th>Produk</th></tr></thead><tbody>
+    ${list.map(c=>`<tr><td><b>${esc(c.n||"–")}</b><div class="hint">${esc(c.u||"")}</div></td><td>${esc(c.ch)}</td><td>${esc(c.p||"–")}</td><td class="wrapcell">${esc([c.c,c.v].filter(Boolean).join(", "))}${c.a?`<div class="hint">${esc(c.a)}</div>`:""}</td>
+      <td class="n">${c.cnt>1?`<span class="pill good">${num(c.cnt)}×</span>`:num(c.cnt)}</td><td class="n">${rp0(c.gross)}</td><td>${fdate(c.first)}</td><td>${fdate(c.last)}</td><td class="wrapcell">${Object.entries(c.sku).map(([k,v])=>`${esc(k)} ×${num(v)}`).join(", ")}</td></tr>`).join("")}
+    </tbody></table></div><p class="hint">${num(total)} pelanggan${total>300?" (ditampilkan 300 teratas)":""}. Nama dan nomor HP tampil sesuai yang diberikan marketplace (sebagian disamarkan oleh TikTok/Shopee).</p></div>
+  ${custAdvice(X)}`;
+};
+function custAdvice(X){
+  const pc=v=>v==null?"–":(v*100).toFixed(1).replace(".",",")+"%",A=[];
+  if(X.rate!=null&&X.rate<0.1)A.push(`Repeat rate ${pc(X.rate)} masih rendah (toko perawatan kulit yang sehat biasanya 15–30%). Sisipkan kartu terima kasih + voucher pembelian kedua di setiap paket.`);
+  if(X.gapMed!=null)A.push(`Pembeli biasanya membeli lagi setelah ±${num(X.gapMed)} hari. Kirim pengingat atau voucher (chat toko/broadcast) sekitar hari ke-${num(Math.max(1,X.gapMed-3))} setelah pembelian pertama.`);
+  if(X.G&&X.GR/X.G<0.15)A.push("Sebagian besar omzet masih dari pembeli baru, sehingga sangat bergantung pada iklan. Program pembeli ulang menurunkan TACOS.");
+  A.push("Tawarkan paket lebih besar kepada pembeli repeat (mereka sudah percaya produknya): misalnya pembeli isi 1/isi 2 diarahkan ke isi 3–4.");
+  return`<div class="panel"><h3>Saran</h3><ul style="margin:0 0 0 18px;padding:0">${A.map(a=>`<li>${a}</li>`).join("")}</ul></div>`;
+}
 
 V.price=()=>{
   const s=stockOf(),pl=monthPL(),prods=sortBy("products"),mats=sortBy("materials");
@@ -1198,7 +1280,7 @@ const spMin=v=>{const m=clean(v).match(/^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)/
 const spGap=r=>{const a=spMin(r["Waktu Pembayaran Dilakukan"]),b=spMin(r["Waktu Pengiriman Diatur"]);return a==null||b==null?null:b-a;};
 function parseShopeeOrders(rows,name){
   const by=new Map();for(const r of rows){const id=clean(r["No. Pesanan"]);if(!id)continue;if(!by.has(id))by.set(id,[]);by.get(id).push(r);}
-  const days={},skuMap={},unmatched={};let n=0,skipped=0,kilat=0;const cnt={};
+  const days={},skuMap={},unmatched={},cust={};let n=0,skipped=0,kilat=0;const cnt={};
   for(const [id,lines] of by){
     const r0=lines[0],date=ymd(r0["Waktu Pesanan Dibuat"]);if(!date){skipped++;continue;}
     const it=[];let bad=false;
@@ -1210,9 +1292,10 @@ function parseShopeeOrders(rows,name){
     const gap=spGap(r0),o={i:id,t:hm(r0["Waktu Pesanan Dibuat"]),s,it,c:"",cr:"",pv:clean(r0["Provinsi"]),py:clean(r0["Metode Pembayaran"])};
     if(gap!=null&&gap<=25){o.k=1;kilat++;}
     (days[date]||=[]).push(o);
+    (cust[date]||=[]).push(custRow(id,r0["Username (Pembeli)"],r0["Nama Penerima"],r0["No. Telepon"],r0["Kota/Kabupaten"],r0["Provinsi"],r0["Alamat Pengiriman"]));
   }
   const dates=Object.keys(days).sort();
-  return{kind:"orders",ch:SP,name,label:"Pesanan Shopee",days,n,skipped,kilat,cnt,skuMap,unmatched,from:dates[0],to:dates[dates.length-1]};
+  return{kind:"orders",ch:SP,name,label:"Pesanan Shopee",days,cust,n,skipped,kilat,cnt,skuMap,unmatched,from:dates[0],to:dates[dates.length-1]};
 }
 function parseShopeeIncome(wb,name){
   let det=null,sumCheck=null;
@@ -1309,9 +1392,12 @@ function matchProduct(sku,variation){
 }
 const TT_STATUS=s=>({"Dibatalkan":"batal","Belum dibayar":"pending","Selesai":"selesai","Dikirim":"dikirim"}[s]||"baru");
 
+/* buyer details for the Pelanggan module; masked values ("****") are dropped */
+const custVal=v=>{const t=clean(v);return t&&!/^[*\s]*$/.test(t)?t:"";};
+const custRow=(i,u,n,p,c,v,a)=>{const r={i};const set=(k,x)=>{const t=Array.isArray(x)?x.map(custVal).filter(Boolean).join(", "):custVal(x);if(t)r[k]=t;};set("u",u);set("n",n);set("p",p);set("c",c);set("v",v);set("a",a);return r;};
 function parseOrders(rows,name){
   const by=new Map();for(const r of rows){const id=clean(r["Order ID"]);if(!id)continue;if(!by.has(id))by.set(id,[]);by.get(id).push(r);}
-  const days={},skuMap={},unmatched={};let n=0,skipped=0,cnt={};
+  const days={},skuMap={},unmatched={},cust={};let n=0,skipped=0,cnt={};
   for(const [id,lines] of by){
     const r0=lines[0],date=ymd(r0["Created Time"]);if(!date){skipped++;continue;}
     const it=[];let bad=false;
@@ -1322,9 +1408,10 @@ function parseOrders(rows,name){
     if(bad){skipped++;continue;}
     const st0=clean(r0["Order Status"]),s=st0==="Dibatalkan"&&clean(r0["Shipped Time"])?"gagal":TT_STATUS(st0);cnt[s]=(cnt[s]||0)+1;n++;
     (days[date]||=[]).push({i:id,t:hm(r0["Created Time"]),s,it,c:clean(r0["Order Channel"]),cr:clean(r0["Creator Handle"]),pv:clean(r0["Province"]),py:clean(r0["Payment Method"])});
+    (cust[date]||=[]).push(custRow(id,r0["Buyer Username"],r0["Recipient"],r0["Phone #"],r0["Regency and City"],r0["Province"],[r0["Detail Address"],r0["Districts"],r0["Villages"]]));
   }
   const dates=Object.keys(days).sort();
-  return{kind:"orders",ch:TT,name,label:"Pesanan TikTok Shop",days,n,skipped,cnt,skuMap,unmatched,from:dates[0],to:dates[dates.length-1]};
+  return{kind:"orders",ch:TT,name,label:"Pesanan TikTok Shop",days,cust,n,skipped,cnt,skuMap,unmatched,from:dates[0],to:dates[dates.length-1]};
 }
 function parseIncome(wb,name){
   let det=null,wd=[];
@@ -1451,7 +1538,7 @@ function impHtml(busy){
     return`<div class="panel" style="padding:12px"><div class="row"><b>${esc(x.label)}</b><div class="sp"></div><span class="pill ${x.kind==="skip"?"":"good"}">${x.kind==="skip"?"Dilewati":"Siap"}</span></div><div class="hint" style="overflow-wrap:anywhere">${esc(x.name)}</div>${d}</div>`;
   };
   return`<h2>Impor file marketplace</h2>
-  <p class="hint">Pilih satu atau beberapa file sekaligus dari TikTok Shop: <b>Semua pesanan</b> (.csv), <b>income</b> (.xlsx), dan file data iklan & analitik (Campaign overview, Product data, Live campaign, Livestream, Creative data, Product Card Traffic, Live Performance Core). Jenis file dikenali otomatis. File dibaca di browser kamu; nama, alamat, dan nomor HP pembeli tidak dibaca dan tidak disimpan.</p>
+  <p class="hint">Pilih satu atau beberapa file sekaligus dari TikTok Shop: <b>Semua pesanan</b> (.csv), <b>income</b> (.xlsx), dan file data iklan & analitik (Campaign overview, Product data, Live campaign, Livestream, Creative data, Product Card Traffic, Live Performance Core). Jenis file dikenali otomatis. File dibaca di browser kamu. Data pembeli (username, nama, HP, kota, alamat sesuai file) disimpan untuk modul Pelanggan, yang hanya bisa dibuka CEO, Pemilik, dan Admin.</p>
   <label class="btn" style="justify-self:start" for="impfile">Pilih file…</label><input type="file" id="impfile" multiple accept=".csv,.xlsx,.xls" hidden>
   <div style="display:grid;gap:10px">${busy?`<div class="hint">${esc(busy)}</div>`:IMP.map(card).join("")}</div>
   ${hasInc?`<label class="field" style="max-width:340px"><span>Penarikan saldo TikTok masuk ke</span><select id="impacc">${sortAcc().filter(a=>a.id!==TT_ACC).map(a=>`<option value="${a.id}" ${a.id===(S.settings.ttWithdrawAcc||defAcc("bank"))?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>`:""}
@@ -1475,11 +1562,21 @@ async function saveImport(withdrawAcc,progress){
   if((IMP.some(x=>x.kind==="adsdaily")||IMP.some(x=>x.kind==="income"&&x.adjs.some(a=>/iklan/i.test(a.type))))&&!byId("accounts",ADS_ACC))jobs.push(["Membuat rekening Saldo Iklan TikTok",()=>db.collection("accounts").doc(ADS_ACC).set({name:"Saldo Iklan TikTok",type:"marketplace",opening:0,sort:4,created:Date.now()})]);
   if(IMP.some(x=>x.rkind==="shopeeads"||(x.kind==="income"&&x.ch===SP))&&!byId("accounts",ADS_SP_ACC))jobs.push(["Membuat rekening Saldo Iklan Shopee",()=>db.collection("accounts").doc(ADS_SP_ACC).set({name:"Saldo Iklan Shopee",type:"marketplace",opening:0,sort:6,created:Date.now()})]);
   for(const ch of [TT,SP])if(IMP.some(x=>x.kind==="income"&&x.ch===ch)&&!byId("accounts",CHX[ch].acc))jobs.push([`Membuat rekening ${CHX[ch].accName}`,()=>db.collection("accounts").doc(CHX[ch].acc).set({name:CHX[ch].accName,type:"marketplace",opening:0,sort:ch===TT?3:5,created:Date.now()})]);
+  const custJobs=new Map();
   for(const x of IMP){
     if(x.kind==="orders")for(const [date,list] of Object.entries(x.days)){
       const id=`${CHX[x.ch].pre}-${date}`,prev=byId("orderdays",id),map=new Map((prev?.orders||[]).map(e=>[e.i,e]));
-      for(const e of list){const o=map.get(e.i);if(o)e.it=e.it.map(a=>{const q=o.it.find(b=>b[0]===a[0]);return q?[a[0],a[1],a[2],q[3]]:a;});map.set(e.i,e);}
+      /* an older export must not move an order back (Selesai → Dikirim): keep the further status */
+      const RK={pending:0,baru:1,dikirim:2,selesai:3,gagal:3,batal:3};
+      for(const e of list){const o=map.get(e.i);if(o){e.it=e.it.map(a=>{const q=o.it.find(b=>b[0]===a[0]);return q?[a[0],a[1],a[2],q[3]]:a;});if((RK[o.s]??0)>(RK[e.s]??0))e.s=o.s;}map.set(e.i,e);}
       jobs.push([`Pesanan ${fdate(date)}`,()=>db.collection("orderdays").doc(id).set({ch:x.ch,date,orders:[...map.values()]})]);
+    }
+    /* buyer details: several files may cover the same day, so they are merged first and each day is written once */
+    if(x.kind==="orders"&&x.cust&&CUST_OK())for(const [date,list] of Object.entries(x.cust)){
+      const id=`${CHX[x.ch].pre}-${date}`;let d=custJobs.get(id);
+      if(!d){d={ch:x.ch,date,map:new Map((byId("customers",id)?.list||[]).map(e=>[e.i,e]))};custJobs.set(id,d);
+        jobs.push([`Data pembeli ${fdate(date)}`,()=>db.collection("customers").doc(id).set({ch:d.ch,date:d.date,list:[...d.map.values()]})]);}
+      for(const e of list)d.map.set(e.i,{...(d.map.get(e.i)||{}),...e});
     }
     if(x.kind==="income"){
       for(const [date,d] of Object.entries(x.days)){
@@ -1579,8 +1676,8 @@ function skuStats(m,ch,from,to){
   return Object.values(P).map(r=>{const n=r.orders.size,cm=r.gross-r.fee-r.hpp,profit=cm-r.ads;return{...r,name:pname(r.id,pm),n,cm,profit,aov:n?r.gross/n:null,roas:r.ads?r.adsGmv/r.ads:null,be:cm>0?r.gross/cm:null,acos:r.adsGmv?r.ads/r.adsGmv:null,tacos:r.gross?r.ads/r.gross:null,roi:r.ads?profit/r.ads:null,margin:r.gross?profit/r.gross:null};});
 }
 /* change history (website version): every add/change/delete is logged by the database with the user's ID */
-const AUD_COLL={products:"Produk",materials:"Bahan",production:"Produksi",orders:"Pesanan manual",purchases:"Pembelian",cash:"Kas/beban",moves:"Penyesuaian stok",accounts:"Rekening",transfers:"Transfer",receipts:"Pencairan manual",recurring:"Beban rutin",orderdays:"Impor pesanan",settles:"Impor pencairan",adsdaily:"Impor iklan harian",adsreports:"Impor laporan/analitik",returns:"Retur pembeli",supreturns:"Retur ke supplier",suppliers:"Supplier",appay:"Bayar hutang",apopen:"Hutang awal",config:"Pengaturan",profiles:"Pengguna"};
-const AUD_TAB={sales:["orders","orderdays","returns"],buy:["purchases","suppliers","supreturns"],ap:["appay","apopen","suppliers","purchases"],stock:["products","materials","production","moves","returns","supreturns"],price:["products","materials"],cost:["cash","recurring"],bank:["accounts","transfers","cash"],ar:["receipts","settles","config"],ads:["adsdaily","adsreports"],set:null,dash:null,daily:["orderdays","settles","adsdaily"],report:null};
+const AUD_COLL={customers:"Data pelanggan",products:"Produk",materials:"Bahan",production:"Produksi",orders:"Pesanan manual",purchases:"Pembelian",cash:"Kas/beban",moves:"Penyesuaian stok",accounts:"Rekening",transfers:"Transfer",receipts:"Pencairan manual",recurring:"Beban rutin",orderdays:"Impor pesanan",settles:"Impor pencairan",adsdaily:"Impor iklan harian",adsreports:"Impor laporan/analitik",returns:"Retur pembeli",supreturns:"Retur ke supplier",suppliers:"Supplier",appay:"Bayar hutang",apopen:"Hutang awal",config:"Pengaturan",profiles:"Pengguna"};
+const AUD_TAB={cust:["customers"],sales:["orders","orderdays","returns"],buy:["purchases","suppliers","supreturns"],ap:["appay","apopen","suppliers","purchases"],stock:["products","materials","production","moves","returns","supreturns"],price:["products","materials"],cost:["cash","recurring"],bank:["accounts","transfers","cash"],ar:["receipts","settles","config"],ads:["adsdaily","adsreports"],set:null,dash:null,daily:["orderdays","settles","adsdaily"],report:null};
 const AUD_ACT={insert:["Tambah","good"],update:["Ubah","warn"],delete:["Hapus","bad"]};
 function auditDesc(e){
   const i=e.info||{},pm=pmap(),bits=[];
@@ -1845,7 +1942,7 @@ function render(){
 }
 document.getElementById("tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-tab]");if(!b)return;tab=b.dataset.tab;try{localStorage.setItem("kiso.tab",tab)}catch(_){}render();window.scrollTo(0,0);});
 monthSel.addEventListener("change",()=>{salesLimit=300;dailyDay="";render();});
-app.addEventListener("change",e=>{if(e.target.id==="dailyDay"){dailyDay=e.target.value;render();}if(e.target.id==="perfDay"){perfDay=e.target.value;render();}});
+app.addEventListener("change",e=>{if(e.target.id==="dailyDay"){dailyDay=e.target.value;render();}if(e.target.id==="perfDay"){perfDay=e.target.value;render();}if(e.target.id==="custQ"){custQ=e.target.value;render();}if(e.target.id==="custAll"){custAll=e.target.checked;render();}});
 app.addEventListener("click",async e=>{
   const b=e.target.closest("[data-team]");if(!b)return;const a=b.dataset.team,id=b.dataset.id;
   try{
@@ -1863,6 +1960,8 @@ app.addEventListener("click",e=>{
   const ch=t.closest("[data-chan]");if(ch){salesFilter=ch.dataset.chan;render();return;}
   const adc=t.closest("[data-adsch]");if(adc){adsCh=adc.dataset.adsch;render();return;}
   const dch=t.closest("[data-dailych]");if(dch){dailyCh=dch.dataset.dailych;render();return;}
+  const cuc=t.closest("[data-custch]");if(cuc){custCh=cuc.dataset.custch;render();return;}
+  const cus=t.closest("[data-custsort]");if(cus){custSort=cus.dataset.custsort;render();return;}
   const pfm=t.closest("[data-perfmode]");if(pfm){perfMode=pfm.dataset.perfmode;render();return;}
   const pfc=t.closest("[data-perfch]");if(pfc){perfCh=pfc.dataset.perfch;render();return;}
   const au=t.closest("[data-auduser]");if(au){audUser=au.dataset.auduser;render();return;}
