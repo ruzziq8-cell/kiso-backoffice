@@ -1510,8 +1510,12 @@ function parseAds(kind,rows,name){
   if(kind==="livedaily")out=rows.map(r=>({date:ymd(r["Waktu"]),gmv:nv(gp(r,"GMV dari LIVE")),sessions:nv(r["Siaran LIVE"]),withGmv:nv(gp(r,"Jumlah Siaran LIVE yang")),orders:nv(r["Pesanan SKU teratribusi"]),views:nv(r["Tayangan LIVE"]),watch:nv(gp(r,"Durasi menonton"))})).filter(x=>x.date);
   if((kind==="cardtraffic"||kind==="livedaily")&&out.length){per[0]=out[0].date;per[1]=out[out.length-1].date;}
   if(kind==="product")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({camp:r["Nama kampanye"],prod:r["Nama produk"].slice(0,80),spend:nv(r["Biaya"]),orders:nv(r["Pesanan SKU"]),gmv:nv(r["Pendapatan kotor"])}));
-  if(kind==="prodcampaign")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({camp:r["Nama kampanye"],budget:nv(r["Anggaran saat ini"]),spend:nv(r["Biaya"]),gmv:nv(r["Pendapatan kotor"]),orders:nv(r["Pesanan SKU"]),roi:nv(r["ROI"])}));
-  if(kind==="livecampaign")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({camp:r["Nama kampanye"],budget:nv(r["Anggaran saat ini"]),spend:nv(r["Biaya"]),gmv:nv(r["Pendapatan kotor"]),orders:nv(r["Pesanan SKU"]),views:nv(r["Tayangan LIVE"])}));
+  if(kind==="prodcampaign")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({camp:r["Nama kampanye"],budget:nv(r["Anggaran saat ini"]),spend:nv(r["Biaya"]),gmv:nv(g1(r,"Pendapatan kotor","Penghasilan bruto")),orders:nv(r["Pesanan SKU"]),roi:nv(r["ROI"])}));
+  if(kind==="livecampaign")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({camp:r["Nama kampanye"],budget:nv(r["Anggaran saat ini"]),spend:nv(r["Biaya"]),gmv:nv(g1(r,"Pendapatan kotor","Penghasilan bruto")),orders:nv(r["Pesanan SKU"]),views:nv(r["Tayangan LIVE"])}));
+  /* daily-per-campaign layout: add the days up per campaign so the report looks like the usual one */
+  if((kind==="prodcampaign"||kind==="livecampaign")&&rows.some(r=>r["Per Hari"])){const by=new Map();
+    for(const x of out){const y=by.get(x.camp);if(!y){by.set(x.camp,{...x});continue;}for(const k of ["spend","gmv","orders","views"])if(k in x)y[k]=(y[k]||0)+(x[k]||0);}
+    out=[...by.values()].map(x=>kind==="prodcampaign"?{...x,roi:x.spend?x.gmv/x.spend:0}:x);}
   if(kind==="live"){out=rows.filter(r=>r["ID live room"]).map(r=>({id:r["ID live room"],name:r["Nama LIVE"].slice(0,60),start:r["Waktu peluncuran"].slice(0,16),dur:r["duration"],spend:nv(r["Biaya"]),orders:nv(r["Pesanan SKU"]),gmv:nv(r["Pendapatan kotor"]),views:nv(r["Tayangan LIVE"])})).sort((a,b)=>b.start.localeCompare(a.start)).slice(0,600);}
   if(kind==="creative"||kind==="creativeprod"){
     const all=rows.filter(r=>r["ID postingan"]||r["Materi Iklan"]);const st={};
@@ -1550,7 +1554,8 @@ async function analyze(file){
     if(hdr.has("Siaran LIVE")&&hdr.has("Waktu"))return parseAds("livedaily",t("Waktu"),file.name);
     if(hdr.has("SKU ID")&&hdr.has("Produk terjual"))return{kind:"skip",name:file.name,label:"Daftar SKU",why:"Penjualan per SKU sudah dihitung dari file pesanan."};
     if(first.slice(0,4).some(r=>/Tanggal analisis/i.test(clean(r[0])))||(first[2]||[]).length>100)return{kind:"skip",name:file.name,label:"Daftar produk per saluran",why:"Omzet per saluran (video, LIVE, kartu produk, afiliasi) sudah dihitung dari file pesanan."};
-    if(hdr.has("Per Hari"))return parseAds("adsdaily",t("Per Hari"),file.name);
+    /* Product/Live campaign exports may carry a "Per Hari" column too (one row per campaign per day); only the shop-wide overview is the daily ad total */
+    if(hdr.has("Per Hari")&&!hdr.has("ID Campaign")&&!hdr.has("Anggaran saat ini"))return parseAds("adsdaily",t("Per Hari"),file.name);
     if(hdr.has("Time")&&hdr.has("Biaya"))return parseAds("adshourly",t("Time"),file.name);
     if(hdr.has("ID live room")&&/Campaign_\d+/.test(file.name))return SKIP("Sesi LIVE satu kampanye","Sesi yang sama sudah ada di file Livestream data (semua kampanye), jadi tidak dipakai supaya tidak dobel.");
     if(hdr.has("ID live room"))return parseAds("live",t("ID live room"),file.name);
