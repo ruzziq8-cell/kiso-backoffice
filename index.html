@@ -1492,7 +1492,7 @@ function parseIncome(wb,name){
     else{const a={i:id,type:clean(r["Jenis transaksi"]),amt:st,rel:clean(r["ID pesanan terkait"]).replace("/","")};d.adj.push(a);adjs.push({...a,date:pd});}}
   /* "Earnings" rows are TikTok crediting the seller balance (same totals as the order detail), not bank withdrawals */
   const earn=wd.filter(w=>/^(Earnings|GMV Pay)/i.test(clean(w["Jenis transaksi"]))).reduce((a,w)=>a+nv(w["Total"]),0);
-  const withdrawals=wd.filter(w=>/withdraw|penarikan|tarik/i.test(clean(w["Jenis transaksi"]))&&/transferred|berhasil|selesai/i.test(w["Status"]||"")).map(w=>({ref:clean(w["ID referensi"]),date:ymd(w["Waktu keberhasilan"])||ymd(w["Waktu permintaan"]),amount:nv(w["Total"])})).filter(w=>w.ref&&w.date);
+  const withdrawals=wd.filter(w=>/withdraw|penarikan|tarik/i.test(clean(w["Jenis transaksi"]))&&/transferred|berhasil|selesai/i.test(w["Status"]||"")).map(w=>({ref:clean(w["ID referensi"]),date:ymd(w["Waktu keberhasilan"])||ymd(w["Waktu permintaan"]),amount:Math.abs(nv(w["Total"]))})).filter(w=>w.ref&&w.date&&w.amount);  /* TikTok writes withdrawals as negative numbers */
   const dates=Object.keys(days).sort();
   return{kind:"income",ch:TT,name,label:"Laporan income TikTok Shop",days,n,sum,adjs,withdrawals,earn,hasEarn:wd.length>0,from:dates[0],to:dates[dates.length-1],ok:!!det};
 }
