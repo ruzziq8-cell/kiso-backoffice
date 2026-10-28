@@ -231,8 +231,21 @@ function shopeeAdsSet(){
     for(let d=r.from;d<=r.to;d=addDays(d,1)){if(taken.has(d)){seg=null;continue;}taken.add(d);if(seg)seg.to=d;else{seg={from:d,to:d};segs.push(seg);}}
     segs.forEach((g,i)=>{const n=mdays(g.from,g.to),f=n/r.len,rows=f===1?(r.rows||[]):(r.rows||[]).map(x=>scale(x,f));
       out.push({...r,id:segs.length>1||f<1?`${r.id}#${i}`:r.id,from:g.from,to:g.to,len:n,frac:f,rows,spend:rows.reduce((a,x)=>a+(+x.spend||0),0)});});}
-  return out.sort((a,b)=>a.from.localeCompare(b.from));
+  /* days covered by the ad-balance transaction history use its actual daily deduction; campaign rows keep their share */
+  const B=spBill();if(!Object.keys(B).length)return out.sort((a,b)=>a.from.localeCompare(b.from));
+  const res=[],used=new Set(),sum=rows=>rows.reduce((a,x)=>a+(+x.spend||0),0),ZR={views:0,clicks:0,cart:0,conv:0,units:0,gmv:0,gmvd:0};
+  for(const s of out){let run=null;const parts=[];
+    for(let d=s.from;d<=s.to;d=addDays(d,1)){if(B[d]){run=null;parts.push({from:d,to:d,bill:1});}else if(run)run.to=d;else{run={from:d,to:d};parts.push(run);}}
+    if(parts.length===1&&!parts[0].bill){res.push(s);continue;}
+    parts.forEach((g,i)=>{const n=mdays(g.from,g.to),f=n/s.len;let rows=(s.rows||[]).map(x=>scale(x,f));
+      if(g.bill){const b=+B[g.from].spend||0,sp=sum(rows);used.add(g.from);rows=sp>0?rows.map(x=>({...x,spend:(+x.spend||0)*b/sp})):b?[...rows,{...ZR,name:"Iklan Shopee (riwayat saldo iklan)",spend:b}]:rows;}
+      res.push({...s,id:`${s.id}~${i}`,from:g.from,to:g.to,len:n,frac:(s.frac||1)*f,rows,spend:sum(rows),bill:!!g.bill});});}
+  for(const d in B)if(!used.has(d)&&+B[d].spend)res.push({id:`spbill-${d}`,kind:"shopeeads",ch:SP,from:d,to:d,len:1,frac:1,bill:true,rows:[{...ZR,name:"Iklan Shopee (riwayat saldo iklan)",spend:+B[d].spend}],spend:+B[d].spend});
+  return res.sort((a,b)=>a.from.localeCompare(b.from));
 }
+/* Shopee ad-balance transaction history (Riwayat Transaksi saldo iklan), per day; the newest file wins for each day it covers */
+function spBill(){const B={};for(const r of S.adsreports.filter(r=>r.kind==="shopeebill"&&r.from&&r.to).sort((a,b)=>a.to.localeCompare(b.to)||(a.created||0)-(b.created||0))){
+  for(let d=r.from;d<=r.to;d=addDays(d,1))B[d]={d,spend:0,top:0,auto:0,pengh:0};for(const x of r.rows||[])if(x.d)B[x.d]={...B[x.d],...x};}return B;}
 const mdays=(a,b)=>Math.round((new Date(b+"T00:00")-new Date(a+"T00:00"))/864e5)+1;
 /* ad spend of a period report attributed to a month in proportion to the days that fall in it */
 function shopeeAdSpend(m){const a=m+"-01",b=endOf(m);let t=0;for(const r of shopeeAdsSet()){const f=r.from>a?r.from:a,e=r.to<b?r.to:b;if(f<=e)t+=r.spend*mdays(f,e)/r.len;}return t;}
@@ -400,7 +413,7 @@ const apTotal=asOf=>Object.values(apState(asOf)).reduce((a,s)=>a+s.left,0);
 const buyTotal=b=>(b.items||[]).reduce((a,it)=>a+(+it.qty||0)*(+it.cost||0),0)+(+b.extra||0);
 
 function ledger(){
-  const L=[];
+  const L=[],BILL=spBill();
   for(const c of S.cash)L.push({date:c.date,acc:c.account,amt:c.type==="keluar"?-(+c.amount||0):+c.amount||0,desc:`${c.category}${c.note?" · "+c.note:""}`,kind:"cash",cat:c.category,id:c.id});
   for(const t of S.transfers){L.push({date:t.date,acc:t.from,amt:-(+t.amount||0),desc:`Transfer ke ${aname(t.to)}${t.note?" · "+t.note:""}`,kind:"transfer",id:t.id});L.push({date:t.date,acc:t.to,amt:+t.amount||0,desc:`Transfer dari ${aname(t.from)}${t.note?" · "+t.note:""}`,kind:"transfer",id:t.id});}
   for(const r of S.receipts)if(r.type==="pencairan")L.push({date:r.date,acc:r.account,amt:+r.amount||0,desc:`Pencairan ${r.channel} · pesanan ${mshort(r.period)}${r.note?" · "+r.note:""}`,kind:"receipt",id:r.id});
@@ -410,10 +423,13 @@ function ledger(){
   for(const b of S.purchases)if(b.paid&&b.status!=="batal"&&b.payAccount)L.push({date:b.payDate||b.date,acc:b.payAccount,amt:-buyTotal(b),desc:`Bayar supplier ${b.supplier||""}`,kind:"buy",id:b.id});
   for(const d of S.settles){const sum=(d.rows||[]).reduce((a,r)=>a+(+r.st||0),0),n=(d.rows||[]).filter(r=>+r.st).length;
     if(sum)L.push({date:d.date,acc:d.account,amt:sum,desc:`Penyelesaian ${n} pesanan ${d.ch}`,kind:"settle",id:d.id});
-    const ga=(d.rows||[]).reduce((a,r)=>a+(+r.a||0),0);if(ga)L.push({date:d.date,acc:d.ch===SP?ADS_SP_ACC:ADS_ACC,amt:ga,desc:d.ch===SP?"Top-up saldo iklan otomatis dari penghasilan Shopee":`Biaya iklan GMV Max dipotong dari pencairan ${d.ch}`,kind:"settle",id:d.id});
+    const ga=(d.rows||[]).reduce((a,r)=>a+(+r.a||0),0);if(ga&&!(d.ch===SP&&BILL[d.date]))L.push({date:d.date,acc:d.ch===SP?ADS_SP_ACC:ADS_ACC,amt:ga,desc:d.ch===SP?"Top-up saldo iklan otomatis dari penghasilan Shopee":`Biaya iklan GMV Max dipotong dari pencairan ${d.ch}`,kind:"settle",id:d.id});
     for(const a of d.adj||[]){L.push({date:d.date,acc:d.account,amt:+a.amt||0,desc:`${a.type} (${d.ch})`,kind:"settle",id:d.id});
       if(/iklan/i.test(a.type))L.push({date:d.date,acc:ADS_ACC,amt:-(+a.amt||0),desc:`Pembayaran iklan dari saldo ${d.ch}`,kind:"settle",id:d.id});}}
-  for(const r of shopeeAdsSet())if(r.spend)L.push({date:r.to,acc:ADS_SP_ACC,amt:-r.spend,desc:`Pemakaian iklan Shopee ${fdate(r.from)}–${fdate(r.to)}`,kind:"ads",cat:"Iklan Shopee",id:r.id});
+  for(const d in BILL){const x=BILL[d],t=(+x.top||0)+(+x.auto||0);
+    if(+x.pengh)L.push({date:d,acc:ADS_SP_ACC,amt:+x.pengh,desc:"Isi saldo otomatis dari penghasilan Shopee",kind:"settle",id:"spbill-"+d});
+    if(t){L.push({date:d,acc:SP_ACC,amt:-t,desc:"Isi saldo iklan Shopee (dari Saldo Penjual)",kind:"transfer",id:"spbill-"+d});L.push({date:d,acc:ADS_SP_ACC,amt:t,desc:`Isi saldo iklan dari Saldo Penjual${+x.auto?` (otomatis ${rp(+x.auto)})`:""}`,kind:"transfer",id:"spbill-"+d});}}
+  for(const r of shopeeAdsSet())if(r.spend)L.push({date:r.to,acc:ADS_SP_ACC,amt:-r.spend,desc:r.from===r.to?`Pemakaian iklan Shopee ${fdate(r.from)}`:`Pemakaian iklan Shopee ${fdate(r.from)}–${fdate(r.to)}`,kind:"ads",cat:"Iklan Shopee",id:r.id});
   for(const d of S.adsdaily)if(+d.spend)L.push({date:d.date,acc:ADS_ACC,amt:-d.spend,desc:`Pemakaian iklan ${d.ch||"TikTok"}`,kind:"ads",cat:"Iklan TikTok",id:d.id});
   return L.sort((a,b)=>(a.date||"").localeCompare(b.date||""));
 }
@@ -1374,6 +1390,15 @@ function parseShopeeIncome(wb,name){
   const dates=Object.keys(days).sort();
   return{kind:"income",ch:SP,name,label:"Laporan penghasilan Shopee (dana dilepas)",days,n,sum,adjs:[],withdrawals:[],sumCheck,from:dates[0],to:dates[dates.length-1],ok:!!det};
 }
+function parseShopeeBill(first,name){
+  const tl=first.find(r=>/^Tanggal/i.test(clean(r[0]))),pm=tl&&/(\d{2})\/(\d{2})\/(\d{4})\s*-+\s*(\d{2})\/(\d{2})\/(\d{4})/.exec(clean(tl[1])),days={};
+  for(const r of table(first,"Urutan")||[]){const d=ymd(r["Waktu"]),desc=clean(r["Deskripsi"]),a=nv(r["Jumlah"]);if(!d||!a)continue;
+    const x=days[d]||={d,spend:0,top:0,auto:0,pengh:0};
+    if(a<0)x.spend-=a;else if(/Isi Saldo/i.test(desc))x[/Penghasilan/i.test(desc)?"pengh":/Otomatis/i.test(desc)?"auto":"top"]+=a;else x.spend-=a;}
+  const rows=Object.values(days).sort((a,b)=>a.d.localeCompare(b.d));
+  const per=pm?[`${pm[3]}-${pm[2]}-${pm[1]}`,`${pm[6]}-${pm[5]}-${pm[4]}`]:[rows[0]?.d,rows[rows.length-1]?.d];
+  return{kind:"report",ch:SP,rkind:"shopeebill",name,label:"Riwayat transaksi saldo iklan Shopee",rows,from:per[0],to:per[1]};
+}
 function parseShopeeAnalytics(kind,wb,name){
   const per=periodFromName(name)||[M()+"-01",endOf(M())];
   if(kind==="shopeefunnel"){const rows=table(sheetRows(wb.Sheets[wb.SheetNames[0]]),"Tanggal")||[];
@@ -1533,6 +1558,7 @@ async function analyze(file){
     if(wb.SheetNames.includes("Penghasilan")&&wb.SheetNames.includes("Summary"))return parseShopeeIncome(wb,file.name);
     if(hdr.has("No. Pesanan")&&hdr.has("Nomor Referensi SKU"))return parseShopeeOrders(table(first,"No. Pesanan"),file.name);
     if(wb.SheetNames.some(n=>/Performa Terbaik/i.test(n)))return parseShopeeExtra("shopeesku",wb,file.name);
+    if(hdr.has("Deskripsi")&&hdr.has("Jumlah")&&hdr.has("Waktu")&&first.some(r=>/Riwayat Transaksi/i.test(clean(r[0])))&&first.some(r=>/Isi Saldo|Product Ad|Iklan/i.test(clean(r[2]))))return parseShopeeBill(first,file.name);
     if(hdr.has("Nama Iklan")&&hdr.has("Efektifitas Iklan")){
       const pl=first.find(r=>clean(r[0])==="Periode"),pm=pl&&/(\d{2})\/(\d{2})\/(\d{4})\s*-\s*(\d{2})\/(\d{2})\/(\d{4})/.exec(clean(pl[1])),per=pm?[`${pm[3]}-${pm[2]}-${pm[1]}`,`${pm[6]}-${pm[5]}-${pm[4]}`]:(periodFromName(file.name)||[M()+"-01",endOf(M())]);
       const rows=(table(first,"Urutan")||[]).filter(r=>r["Nama Iklan"]).map(r=>({name:r["Nama Iklan"].slice(0,90),status:clean(r["Status"]),mode:clean(r["Mode Bidding"]),code:clean(r["Kode Produk"]),views:nv(r["Dilihat"]),clicks:nv(r["Jumlah Klik"]),cart:nv(r["Tambah ke Keranjang"]),conv:nv(r["Konversi"]),units:nv(r["Produk Terjual"]),gmv:nv(r["Omzet Penjualan"]),gmvd:nv(r["Penjualan Langsung (GMV Langsung)"]),spend:nv(r["Biaya"])}));
@@ -1595,6 +1621,7 @@ function impHtml(busy){
       ${x.hasEarn?`<div class="hint">Cek silang: total dana masuk saldo TikTok di sheet Riwayat ${rp(x.earn)} ${Math.abs(x.earn-x.sum)<1?"cocok dengan detail pesanan":`berbeda ${rp(x.earn-x.sum)} dari detail pesanan`}. Semua dana ini masuk ke rekening Saldo TikTok Shop.</div>`:""}
       <div class="hint">${x.ch===SP?"Saat saldo Shopee ditarik ke bank, catat sebagai transfer Saldo Shopee → rekening bank di tab Bank & Kas.":x.withdrawals.length?`${num(x.withdrawals.length)} penarikan ke bank (${rp(ws)}), ${num(wNew)} belum tercatat → dicatat sebagai transfer dari Saldo TikTok Shop ke rekening di bawah.`:"Tidak ada penarikan ke bank di file ini. Saat kamu menarik saldo TikTok ke bank, catat sebagai transfer Saldo TikTok Shop → rekening bank di tab Bank & Kas."}</div>`;}
     }else if(x.kind==="report"&&x.rkind==="shopeesource"){d=`<div>${fdate(x.from)} – ${fdate(x.to)} · penjualan ${rp(x.summary.sales)}, ${num(x.summary.visitors)} pengunjung. Dipakai untuk analitik sumber penjualan saja.</div>`;
+    }else if(x.kind==="report"&&x.rkind==="shopeebill"){const t=k=>x.rows.reduce((a,r)=>a+(+r[k]||0),0);d=`<div>${fdate(x.from)} – ${fdate(x.to)} · pemakaian iklan ${rp(t("spend"))} · isi saldo dari Saldo Penjual ${rp(t("top")+t("auto"))} · isi saldo otomatis dari penghasilan ${rp(t("pengh"))}.</div><div class="hint">Biaya iklan Shopee per hari diambil dari file ini (menggantikan pembagian rata laporan iklan untuk tanggal yang sama). Isi saldo dicatat sebagai pindah dana dari Saldo Shopee ke Saldo Iklan Shopee, bukan beban, jadi tidak dobel.</div>`;
     }else if(x.kind==="report"&&x.rkind==="shopeeads"){const sp=x.rows.reduce((a,r)=>a+r.spend,0),g=x.rows.reduce((a,r)=>a+r.gmv,0);d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${num(x.rows.length)} kampanye · biaya ${rp(sp)} · omzet dari iklan ${rp(g)}.</div><div class="hint">Biaya ini menjadi biaya Iklan Shopee di laba rugi (dibagi rata per hari periode). Top-up saldo iklan diperlakukan sebagai uang muka di rekening Saldo Iklan Shopee, jadi tidak dobel.</div>`;
     }else if(x.kind==="report"&&x.rkind==="shopeeaff"){d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${num(x.rows.length)} pesanan affiliate. Untuk analitik saja: komisi yang benar-benar dipotong sudah tercatat dari file penghasilan (Biaya Komisi AMS).</div>`;
     }else if(x.kind==="report"&&x.analytics){d=`<div>${fdate(x.from)} – ${fdate(x.to)}${x.rows.length?` · ${num(x.rows.length)} baris`:""}.</div><div class="hint">Untuk analitik saja (tab Iklan & Analitik), tidak masuk laba rugi, stok, atau saldo, jadi tidak ada yang terhitung dua kali.</div>`;
@@ -1626,7 +1653,7 @@ impbox.addEventListener("click",async e=>{
 async function saveImport(withdrawAcc,progress){
   const db=S.db,jobs=[];
   if((IMP.some(x=>x.kind==="adsdaily")||IMP.some(x=>x.kind==="income"&&x.adjs.some(a=>/iklan/i.test(a.type))))&&!byId("accounts",ADS_ACC))jobs.push(["Membuat rekening Saldo Iklan TikTok",()=>db.collection("accounts").doc(ADS_ACC).set({name:"Saldo Iklan TikTok",type:"marketplace",opening:0,sort:4,created:Date.now()})]);
-  if(IMP.some(x=>x.rkind==="shopeeads"||(x.kind==="income"&&x.ch===SP))&&!byId("accounts",ADS_SP_ACC))jobs.push(["Membuat rekening Saldo Iklan Shopee",()=>db.collection("accounts").doc(ADS_SP_ACC).set({name:"Saldo Iklan Shopee",type:"marketplace",opening:0,sort:6,created:Date.now()})]);
+  if(IMP.some(x=>x.rkind==="shopeeads"||x.rkind==="shopeebill"||(x.kind==="income"&&x.ch===SP))&&!byId("accounts",ADS_SP_ACC))jobs.push(["Membuat rekening Saldo Iklan Shopee",()=>db.collection("accounts").doc(ADS_SP_ACC).set({name:"Saldo Iklan Shopee",type:"marketplace",opening:0,sort:6,created:Date.now()})]);
   for(const ch of [TT,SP])if(IMP.some(x=>x.kind==="income"&&x.ch===ch)&&!byId("accounts",CHX[ch].acc))jobs.push([`Membuat rekening ${CHX[ch].accName}`,()=>db.collection("accounts").doc(CHX[ch].acc).set({name:CHX[ch].accName,type:"marketplace",opening:0,sort:ch===TT?3:5,created:Date.now()})]);
   const custJobs=new Map();
   for(const x of IMP){
@@ -1891,7 +1918,7 @@ V.adsShopee=()=>{
     <div class="kpi"><span>ROAS</span><b>${f2(aSp?aG/aSp:0)}</b><span>${be?`Impas di ${f2(be)} · ${aG/aSp>=be?"di atas impas":"di bawah impas"}`:"Isi HPP untuk ROAS impas"}</span></div>
     <div class="kpi"><span>CTR · CPC · CVR</span><b>${pct(aC,aV)}</b><span>CPC ${aC?rp0(aSp/aC):"–"} · CVR ${pct(aCv,aC)}</span></div>
   </div>`:""}
-  <p class="hint">${camps.length?`Biaya iklan Shopee di laba rugi = pemakaian iklan dari laporan iklan (${ar.map(r=>`${fdate(r.from)}–${fdate(r.to)}`).join(", ")}), dibagi rata per hari. Top-up saldo iklan (otomatis dari penghasilan ${rp(top)}, atau transfer dari bank) dicatat sebagai uang muka di rekening Saldo Iklan Shopee, jadi tidak dobel.`:`<b>Laporan iklan Shopee untuk bulan ini belum diimpor</b>, jadi biaya iklan Shopee di laba rugi masih ${rp(man)} (hanya dari input manual). Impor file "Data Keseluruhan Iklan Shopee" dari menu Iklan Saya.`} Catat top-up iklan dari bank sebagai transfer ke Saldo Iklan Shopee, bukan sebagai beban.</p>
+  <p class="hint">${camps.length?`Biaya iklan Shopee di laba rugi = pemakaian iklan ${(()=>{const bd=Object.keys(spBill()).filter(d=>d>=start&&d<=end).sort(),rp0=[...new Set(S.adsreports.filter(r=>r.kind==="shopeeads"&&r.from<=end&&r.to>=start).map(r=>`${fdate(r.from)}–${fdate(r.to)}`))];return bd.length?`per hari dari riwayat transaksi saldo iklan (${fdate(bd[0])}–${fdate(bd[bd.length-1])})${rp0.length?`; rincian per kampanye dari laporan iklan (${rp0.join(", ")}) disesuaikan ke angka harian itu`:""}`:`dari laporan iklan (${rp0.join(", ")}), dibagi rata per hari`;})()}. Isi saldo iklan (dari Saldo Penjual, otomatis dari penghasilan, atau transfer dari bank) dicatat sebagai uang muka di rekening Saldo Iklan Shopee, jadi tidak dobel. Untuk angka harian yang pas, impor riwayat transaksi saldo iklan: Iklan Shopee → Saldo Iklan → Riwayat Transaksi → Download.`:`<b>Laporan iklan Shopee untuk bulan ini belum diimpor</b>, jadi biaya iklan Shopee di laba rugi masih ${rp(man)} (hanya dari input manual). Impor file "Data Keseluruhan Iklan Shopee" dari menu Iklan Saya.`} Catat top-up iklan dari bank sebagai transfer ke Saldo Iklan Shopee, bukan sebagai beban.</p>
   ${camps.length?(()=>{const cc=[...camps].sort((a,b)=>b.spend-a.spend).slice(0,12);return`<div class="panel"><div><h3>Biaya iklan vs omzet dari iklan per kampanye (Rp)</h3><p class="hint" style="margin:4px 0 0">Batang hijau = omzet yang dihasilkan iklan, ungu = biaya iklan. Nomor di bawah = urutan kampanye dari biaya terbesar; arahkan kursor atau ketuk untuk nama, ROAS, dan biaya per konversi. Laporan iklan Shopee berupa total per periode, jadi grafiknya per kampanye, bukan per hari.</p></div>
     ${colChart({label:"Biaya iklan dan omzet iklan per kampanye Shopee",series:[{name:"Omzet dari iklan",color:"var(--s1)"},{name:"Biaya iklan",color:"var(--s2)"}],cols:cc.map((x,i)=>({x:String(i+1),v:[x.gmv,x.spend],tip:[`${i+1}. ${x.name}`,`[s1]Omzet dari iklan ${rp(x.gmv)}`,`[s2]Biaya iklan ${rp(x.spend)}`,`ROAS ${f2(x.spend?x.gmv/x.spend:0)}${be?` (impas ${f2(be)})`:""} · ${num(x.conv)} konversi`,x.conv?`Biaya per konversi ${rp0(x.spend/x.conv)}`:"Belum ada konversi"].join("\n")}))})}</div>`;})():""}
   ${camps.length?`<div class="panel"><div class="row"><h3>Kampanye iklan Shopee</h3><div class="sp"></div><span class="hint">${ar.map(r=>`${fdate(r.from)} – ${fdate(r.to)}`).join(", ")}</span></div>
