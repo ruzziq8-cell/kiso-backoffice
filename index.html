@@ -176,6 +176,7 @@ dialog form{display:grid;gap:14px;padding:18px}
       <button role="tab" data-tab="ap">Hutang</button>
       <button role="tab" data-tab="stock">Stok</button>
       <button role="tab" data-tab="price">Harga & Margin</button>
+      <button role="tab" data-tab="calc">Kalkulator Laba</button>
       <button role="tab" data-tab="cost">Beban & Aset</button>
       <button role="tab" data-tab="bank">Bank & Kas</button>
       <button role="tab" data-tab="ar">Piutang</button>
@@ -282,14 +283,14 @@ document.getElementById("themeBtn")?.addEventListener("click",()=>{const i=THEME
 /* ---------- access: who sees which module. The owner manages roles; view-only sharing = Pemilik.
    Write protection for view-only accounts is enforced by claude.ai; module hiding for editors is a display rule. ---------- */
 const ROLES={
-  ceo:{name:"CEO",tabs:"*",write:true,desc:"Melihat dan mengubah semua modul"},
+  ceo:{name:"CEO",tabs:"*",write:true,desc:"Melihat dan mengubah semua modul, termasuk Kalkulator Laba (khusus CEO)"},
   admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","ads","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
   gudang:{name:"Gudang",tabs:["stock"],write:true,desc:"Hanya modul Stok (melihat dan mengubah)"},
-  pemilik:{name:"Pemilik",tabs:"*",write:false,desc:"Melihat semua modul, tidak bisa mengubah apa pun"},
+  pemilik:{name:"Pemilik",tabs:"*",write:false,desc:"Melihat semua modul (kecuali Kalkulator Laba), tidak bisa mengubah apa pun"},
 };
 const TAB_NAME=Object.fromEntries([...document.querySelectorAll("#tabs button")].map(b=>[b.dataset.tab,b.textContent]));
 const ME={ready:false,owner:false,id:null,role:null,canLvl:true,req:null,u:null};
-const canTab=t=>ME.owner||!!ME.role&&(ROLES[ME.role].tabs==="*"||ROLES[ME.role].tabs.includes(t));
+const canTab=t=>t==="calc"?CALC_OK():ME.owner||!!ME.role&&(ROLES[ME.role].tabs==="*"||ROLES[ME.role].tabs.includes(t));
 let PROF={};const profWant=new Set();
 function wantProfiles(ids){const miss=ids.filter(i=>i&&!PROF[i]&&!profWant.has(i));if(!miss.length||!ME.u)return;miss.forEach(i=>profWant.add(i));ME.u.profiles(miss).then(r=>{Object.assign(PROF,r);render();});}
 monthSel.value=today().slice(0,7);
@@ -1194,6 +1195,109 @@ function custAdvice(X){
   return`<div class="panel"><h3>Saran</h3><ul style="margin:0 0 0 18px;padding:0">${A.map(a=>`<li>${a}</li>`).join("")}</ul></div>`;
 }
 
+/* ---------- Kalkulator Laba (CEO only): price simulation per marketplace, fees from real settled orders, no ad cost ---------- */
+function CALC_OK(){return ME.owner||ME.role==="ceo";}
+let CALC={pid:"",pTT:"",pSP:"",qty:1,hpp:"",vTT:0,vSP:0,period:"30",target:15,volTT:"",volSP:"",fixed:0,on:{}};
+try{Object.assign(CALC,JSON.parse(localStorage.getItem("kiso.calc")||"{}"));}catch(_){}
+const calcSave=()=>{try{localStorage.setItem("kiso.calc",JSON.stringify(CALC));}catch(_){}};
+/* fee component → line in the calculator: platform (always charged), program (can be switched off), ongkir (per order) */
+function calcGroup(k){const g=feeGroup(k);
+  if(/Ongkir bersih/i.test(g))return{key:"ongkir",label:"Ongkir ditanggung penjual (rata-rata)",kind:"order",grp:"ongkir"};
+  if(/pemrosesan pesanan/i.test(g))return{key:"proses",label:"Biaya pemrosesan pesanan",kind:"order",grp:"platform"};
+  if(/PPh/i.test(g))return{key:"pph",label:"PPh 22 dipungut",kind:"pct",grp:"platform"};
+  if(/^Biaya komisi platform/i.test(g))return{key:"komisi",label:"Biaya komisi platform",kind:"pct",grp:"platform"};
+  if(/^Komisi dinamis/i.test(g))return{key:"dinamis",label:"Komisi dinamis",kind:"pct",grp:"platform"};
+  if(/administrasi/i.test(g))return{key:"admin",label:"Biaya administrasi",kind:"pct",grp:"platform"};
+  if(/Iklan Toko afiliasi/i.test(k))return{key:"afftoko",label:"Komisi Iklan Toko afiliasi",kind:"pct",grp:"program"};
+  if(/affiliate/i.test(g))return{key:"aff",label:"Komisi affiliate",kind:"pct",grp:"program"};
+  if(/Growth Xtra/i.test(g))return{key:"growth",label:"Program Growth Xtra",kind:"pct",grp:"program"};
+  if(/PayLater/i.test(g))return{key:"paylater",label:"Program PayLater",kind:"pct",grp:"program"};
+  if(/Gratis Ongkir XTRA/i.test(g))return{key:"goxtra",label:"Gratis Ongkir XTRA",kind:"pct",grp:"program"};
+  if(/Cashback/i.test(g))return{key:"cashback",label:"Cashback / koin ditanggung penjual",kind:"pct",grp:"program"};
+  if(/Voucher/i.test(g))return{key:"voucher",label:"Voucher ditanggung penjual (rata-rata data)",kind:"pct",grp:"program"};
+  if(/kampanye/i.test(g))return{key:"kampanye",label:"Biaya kampanye",kind:"pct",grp:"program"};
+  if(/selisih/i.test(g))return null;
+  return{key:"x-"+g,label:g,kind:"pct",grp:"program"};
+}
+function calcRange(){const t=today();if(CALC.period==="bulan")return[M()+"-01",endOf(M())<t?endOf(M()):t];return[addDays(t,-(+CALC.period||30)),t];}
+/* real fee rates per channel from settled orders in the period (orders mostly refunded are left out) */
+function calcRates(ch){const [a,b]=calcRange(),C={};let n=0,G=0;
+  for(const o of ORD()){if(o.channel!==ch||!o.imported||(o.date||"")<a||(o.date||"")>b)continue;const t=orderTotals(o);
+    if(!t.settled||!t.comp||!(t.gross>0)||t.refund>t.gross*0.5)continue;n++;G+=t.gross;const seen={};
+    for(const [k,v] of Object.entries(t.comp)){if(!v||/GMV Max|Isi Saldo Otomatis/i.test(k))continue;const g=calcGroup(k);if(!g)continue;
+      const c=C[g.key]||={...g,s:0,n:0,g:0};c.s+=v;if(!seen[g.key]){seen[g.key]=1;c.n++;c.g+=t.gross;}}}
+  const rows=Object.values(C).filter(c=>Math.abs(c.s)>=1).map(c=>({...c,part:n?c.n/n:0,rate:c.g?c.s/c.g:0,per:c.kind==="order"?(n?c.s/n:0):(c.n?c.s/c.n:0)}))
+    .sort((x,y)=>({platform:0,program:1,ongkir:2}[x.grp]-{platform:0,program:1,ongkir:2}[y.grp])||Math.abs(y.s)-Math.abs(x.s));
+  return{ch,n,G,avg:n?G/n:0,rows,from:a,to:b};}
+const calcOn=(ch,r)=>{const k=ch+"|"+r.key;return r.grp!=="program"?true:k in CALC.on?!!CALC.on[k]:r.part>=0.5;};
+/* actual average selling price and order count of a product per channel in the period */
+function calcActual(pid,ch){const [a,b]=calcRange();let q=0,v=0,n=0;
+  for(const o of ORD())if(o.channel===ch&&counts(o)&&(o.date||"")>=a&&(o.date||"")<=b){n++;for(const it of o.items||[])if(it.productId===pid){q+=+it.qty||0;v+=(+it.qty||0)*(+it.price||0);}}
+  return{price:q?v/q:0,units:q,orders:n,days:mdays(a,b)};}
+const calcDefPrice=(p,A)=>A&&A.units?Math.round(A.price/100)*100:(p?+p.price||0:0);
+function calcOne(ch,R,price,hpp){const qty=Math.max(1,+CALC.qty||1),omzet=price*qty,vouch=+(ch===TT?CALC.vTT:CALC.vSP)||0,base=Math.max(0,omzet-vouch);
+  let pct=0,fixed=0;const lines=[];
+  for(const r of R.rows){const on=calcOn(ch,r);let v=0;if(on){if(r.kind==="pct"){v=base*r.rate;pct+=r.rate;}else{v=r.per;fixed+=r.per;}}lines.push({...r,on,v});}
+  const cost=hpp*qty,fees=lines.reduce((a,l)=>a+l.v,0),laba=base-fees-cost,margin=omzet?laba/omzet:0;
+  const be=pct<1?(fixed+cost+vouch)/(1-pct)/qty:0,tg=(+CALC.target||0)/100,tgt=pct+tg<1?(fixed+cost+vouch)/(1-pct-tg)/qty:0;
+  return{qty,omzet,vouch,base,lines,cost,fees,laba,margin,be,tgt,roas:laba>0?omzet/laba:0};}
+function calcOut(){
+  const p=byId("products",CALC.pid),hpp=CALC.hpp!==""&&CALC.hpp!=null?+CALC.hpp:(p?hppOf(p.id):0);
+  const chans=[TT,SP].map(ch=>{const R=calcRates(ch),A=p?calcActual(p.id,ch):null,price=+(ch===TT?CALC.pTT:CALC.pSP)||calcDefPrice(p,A);return{ch,R,price,X:calcOne(ch,R,price,hpp),A};});
+  if(!p&&!chans.some(c=>c.price))return`<div class="empty">Pilih produk atau isi harga jual untuk mulai menghitung.</div>`;
+  const pc=v=>(v*100).toFixed(2).replace(".",",")+"%",R0=v=>rp(Math.round(v)),cell=v=>`<td class="n${v<-0.5?" neg":""}">${v<-0.5?"−"+R0(-v):R0(v)}</td>`;
+  const keys=[];for(const c of chans)for(const l of c.X.lines)if(!keys.some(k=>k.key===l.key))keys.push(l);const GO={platform:0,program:1,ongkir:2};keys.sort((a,b)=>GO[a.grp]-GO[b.grp]);
+  const grpName={platform:"Biaya platform (selalu dikenakan)",program:"Program (centang yang diikuti)",ongkir:"Ongkir"};
+  let body=`<tr><td>Harga jual${chans[0].X.qty>1?` × ${num(chans[0].X.qty)}`:""}</td>${chans.map(c=>cell(c.X.omzet)).join("")}</tr>`;
+  if(chans.some(c=>c.X.vouch))body+=`<tr><td>Voucher / diskon tambahan ditanggung penjual</td>${chans.map(c=>cell(-c.X.vouch)).join("")}</tr>`;
+  let lastG="";
+  for(const k of keys){if(k.grp!==lastG){lastG=k.grp;body+=`<tr><td colspan="3" class="mut" style="font-weight:600;padding-top:10px">${grpName[k.grp]}</td></tr>`;}
+    body+=`<tr><td>${esc(k.label)}</td>${chans.map(c=>{const l=c.X.lines.find(x=>x.key===k.key);if(!l)return`<td class="n mut">–</td>`;
+      const info=l.kind==="pct"?`${pc(l.rate)}${l.grp==="program"?` · ${Math.round(l.part*100)}% pesanan`:""}`:`rata-rata per pesanan`;
+      const box=l.grp==="program"?`<input type="checkbox" data-calcfee="${esc(c.ch+"|"+l.key)}" ${l.on?"checked":""} aria-label="${esc(l.label)} ${esc(c.ch)}"> `:"";
+      return`<td class="n"><label style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">${box}<span class="hint">${info}</span></label><div class="${l.on&&l.v>0?"neg":l.on?"":"mut"}">${l.on?(l.v>0?"−"+R0(l.v):R0(-l.v)):"tidak ikut"}</div></td>`;}).join("")}</tr>`;}
+  body+=`<tr><td>Total potongan marketplace</td>${chans.map(c=>`<td class="n neg">−${R0(c.X.fees)} <span class="hint">(${pc(c.X.omzet?c.X.fees/c.X.omzet:0)})</span></td>`).join("")}</tr>`;
+  body+=`<tr><td>HPP${chans[0].X.qty>1?` × ${num(chans[0].X.qty)}`:""} <span class="hint">${CALC.hpp!==""&&CALC.hpp!=null?"(diisi manual)":"(dari Harga & Margin)"}</span></td>${chans.map(c=>cell(-c.X.cost)).join("")}</tr>`;
+  body+=`<tr style="font-weight:700"><td>Laba per pesanan (sebelum iklan)</td>${chans.map(c=>`<td class="n ${c.X.laba<0?"neg":"pos"}">${c.X.laba<0?"−"+R0(-c.X.laba):R0(c.X.laba)}</td>`).join("")}</tr>`;
+  body+=`<tr><td>Margin</td>${chans.map(c=>`<td class="n"><span class="pill ${c.X.margin<0?"bad":c.X.margin<(+CALC.target||0)/100?"warn":"good"}">${pc(c.X.margin)}</span></td>`).join("")}</tr>`;
+  body+=`<tr><td>Harga jual impas (laba 0)</td>${chans.map(c=>`<td class="n">${c.X.be?rp(Math.ceil(c.X.be)):"–"}</td>`).join("")}</tr>`;
+  body+=`<tr><td>Harga jual untuk margin ${num(+CALC.target||0)}%</td>${chans.map(c=>`<td class="n">${c.X.tgt?rp(Math.ceil(c.X.tgt/100)*100):"–"}</td>`).join("")}</tr>`;
+  body+=`<tr><td>Batas biaya iklan per pesanan supaya impas <span class="hint">(ROAS impas)</span></td>${chans.map(c=>`<td class="n">${c.X.laba>0?`${R0(c.X.laba)} <span class="hint">(ROAS ${c.X.roas.toFixed(2).replace(".",",")})</span>`:'<span class="mut">rugi sebelum iklan</span>'}</td>`).join("")}</tr>`;
+  const head=`<thead><tr><th>Per pesanan</th>${chans.map(c=>`<th class="n">${c.ch}<div class="hint" style="font-weight:400">${num(c.R.n)} pesanan cair · ${fdate(c.R.from)}–${fdate(c.R.to)}</div></th>`).join("")}</tr></thead>`;
+  const act=p?`<p class="hint">Harga jual aktual ${esc(p.name)} ${fdate(chans[0].R.from)}–${fdate(chans[0].R.to)}: ${chans.map(c=>`${c.ch} ${c.A.units?`rata-rata ${R0(c.A.price)} (${num(c.A.units)} unit)`:"belum ada penjualan"}`).join(" · ")}.</p>`:"";
+  /* volume simulation */
+  const vol=c=>{const v=c.ch===TT?CALC.volTT:CALC.volSP;if(v!==""&&v!=null)return+v||0;const A=c.A;return A&&A.units?Math.round(A.units/Math.max(1,c.X.qty)/A.days*30):0;};
+  const sim=chans.map(c=>{const n=vol(c);return{...c,n,omzet:n*c.X.omzet,laba:n*c.X.laba};}),tO=sim.reduce((a,s)=>a+s.omzet,0),tL=sim.reduce((a,s)=>a+s.laba,0),fx=+CALC.fixed||0;
+  const simT=`<div class="panel"><h3>Simulasi penjualan per bulan</h3>
+    <div class="tbl"><table><thead><tr><th>Channel</th><th class="n">Pesanan / bulan</th><th class="n">Omzet</th><th class="n">Laba sebelum iklan</th></tr></thead><tbody>
+    ${sim.map(s=>`<tr><td>${s.ch}</td><td class="n"><input type="number" min="0" step="1" inputmode="numeric" data-calcvol="${s.ch===TT?"volTT":"volSP"}" value="${s.n}" style="width:110px;text-align:right"></td>${cell(s.omzet)}${cell(s.laba)}</tr>`).join("")}
+    <tr style="font-weight:700"><td>Total</td><td class="n">${num(sim.reduce((a,s)=>a+s.n,0))}</td>${cell(tO)}${cell(tL)}</tr>
+    ${fx?`<tr><td>Beban tetap bulanan</td><td></td><td></td>${cell(-fx)}</tr><tr style="font-weight:700"><td>Laba sebelum iklan setelah beban tetap</td><td></td><td></td>${cell(tL-fx)}</tr>`:""}
+    </tbody></table></div>
+    <p class="hint">${!sim.some(s=>s.n)?"Isi jumlah pesanan per bulan untuk melihat simulasinya.":tL-fx>0?`Anggaran iklan maksimal per bulan supaya masih impas: <b>${rp(tL-fx)}</b> (ROAS impas gabungan ${(tO/(tL-fx)).toFixed(2).replace(".",",")}).`:"Belum menutup beban, bahkan sebelum biaya iklan."} Jumlah pesanan awal = rata-rata penjualan produk ini 30 hari per channel; ubah angkanya untuk simulasi.</p></div>`;
+  return`<div class="panel"><h3>Hasil per pesanan</h3><div class="tbl"><table>${head}<tbody>${body}</tbody></table></div>${act}
+  <p class="hint">Persentase biaya = rata-rata potongan yang benar-benar terpotong di file income (pesanan yang sudah cair dalam periode, pesanan yang sebagian besar dikembalikan tidak dihitung). Persen program = tarif saat pesanan ikut program; "% pesanan" = seberapa sering program itu kena. Biaya tetap per pesanan (pemrosesan, ongkir) memakai rata-rata rupiah per pesanan. Biaya iklan tidak dimasukkan.</p></div>${simT}`;
+}
+V.calc=()=>{
+  if(!CALC_OK())return`<div class="row"><h2>Kalkulator laba</h2></div>`+emptyBox("Tidak ada akses","Kalkulator laba hanya bisa dibuka CEO.");
+  const prods=sortBy("products").filter(p=>p.active!==false);if((!CALC.pid||!byId("products",CALC.pid))&&prods[0]){const pl=monthPL();CALC.pid=(prods.slice().sort((a,b)=>(pl.perProd[b.id]?.qty||0)-(pl.perProd[a.id]?.qty||0))[0]||prods[0]).id;}
+  const p=byId("products",CALC.pid),fld=(id,label,val,extra="")=>`<label class="field"><span>${label}</span><input data-calc="${id}" type="number" inputmode="decimal" value="${esc(val??"")}" ${extra}></label>`;
+  return`<div class="row"><h2>Kalkulator laba</h2><span class="pill acc">Hanya CEO</span></div>
+  <p class="hint">Simulasi laba per pesanan TikTok Shop dan Shopee dari harga jual, dikurangi HPP (dari Harga & Margin) dan potongan marketplace sesuai data asli. Tanpa biaya iklan. Angka yang kamu isi hanya untuk simulasi dan tidak mengubah data apa pun.</p>
+  <div class="panel" id="calcForm"><div class="fgrid">
+    <label class="field"><span>Produk</span><select data-calc="pid">${prods.map(x=>`<option value="${x.id}" ${x.id===CALC.pid?"selected":""}>${esc(x.name)}</option>`).join("")}</select></label>
+    ${fld("pTT","Harga jual TikTok (Rp)",CALC.pTT,`placeholder="${calcDefPrice(p,p&&calcActual(p.id,TT))}"`)}
+    ${fld("pSP","Harga jual Shopee (Rp)",CALC.pSP,`placeholder="${calcDefPrice(p,p&&calcActual(p.id,SP))}"`)}
+    ${fld("qty","Jumlah per pesanan",CALC.qty,'min="1" step="1"')}
+    ${fld("hpp","HPP per unit (kosongkan = dari Harga & Margin)",CALC.hpp,`placeholder="${p?hppOf(p.id):0}"`)}
+    ${fld("vTT","Voucher/diskon tambahan TikTok (Rp/pesanan)",CALC.vTT)}
+    ${fld("vSP","Voucher/diskon tambahan Shopee (Rp/pesanan)",CALC.vSP)}
+    ${fld("target","Target margin (%)",CALC.target,'step="0.5"')}
+    ${fld("fixed","Beban tetap per bulan (opsional, Rp)",CALC.fixed)}
+    <label class="field"><span>Data potongan dari</span><select data-calc="period">${[["30","30 hari terakhir"],["90","90 hari terakhir"],["bulan",`Bulan ${mname(M())}`]].map(([v,l])=>`<option value="${v}" ${CALC.period===v?"selected":""}>${l}</option>`).join("")}</select></label>
+  </div><p class="hint">Harga jual = harga yang dibayar pembeli setelah diskon penjual (harga coret tidak dihitung). Harga kosong = rata-rata harga jual aktual produk ini di channel itu (kalau belum ada penjualan, harga jual di Harga & Margin).</p></div>
+  <div id="calcOut">${calcOut()}</div>`;
+};
 V.price=()=>{
   const s=stockOf(),pl=monthPL(),prods=sortBy("products"),mats=sortBy("materials");
   return`<div class="row"><h2>Harga & margin</h2></div>
@@ -2087,6 +2191,10 @@ function render(){
 }
 document.getElementById("tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-tab]");if(!b)return;tab=b.dataset.tab;try{localStorage.setItem("kiso.tab",tab)}catch(_){}render();window.scrollTo(0,0);});
 monthSel.addEventListener("change",()=>{salesLimit=300;dailyDay="";render();});
+app.addEventListener("input",e=>{const f=e.target.closest?.("[data-calc]");if(!f)return;const k=f.dataset.calc;CALC[k]=f.value;
+  if(k==="pid"){CALC.pTT="";CALC.pSP="";CALC.hpp="";CALC.volTT="";CALC.volSP="";}calcSave();
+  if(k==="pid"||k==="period"){render();return;}const o=document.getElementById("calcOut");if(o)o.innerHTML=calcOut();});
+app.addEventListener("change",e=>{const cf=e.target.closest?.("[data-calcfee],[data-calcvol]");if(cf){if(cf.dataset.calcfee)CALC.on[cf.dataset.calcfee]=cf.checked;else CALC[cf.dataset.calcvol]=cf.value;calcSave();const o=document.getElementById("calcOut");if(o)o.innerHTML=calcOut();return;}});
 app.addEventListener("change",e=>{if(e.target.id==="dailyDay"){dailyDay=e.target.value;render();}if(e.target.id==="perfDay"){perfDay=e.target.value;render();}if(e.target.id==="custQ"){custQ=e.target.value;render();}if(e.target.id==="custAll"){custAll=e.target.checked;render();}});
 app.addEventListener("click",async e=>{
   const b=e.target.closest("[data-team]");if(!b)return;const a=b.dataset.team,id=b.dataset.id;
