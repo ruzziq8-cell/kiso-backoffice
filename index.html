@@ -1214,7 +1214,7 @@ function calcGroup(k){const g=feeGroup(k);
   if(/PayLater/i.test(g))return{key:"paylater",label:"Program PayLater",kind:"pct",grp:"program"};
   if(/Gratis Ongkir XTRA/i.test(g))return{key:"goxtra",label:"Gratis Ongkir XTRA",kind:"pct",grp:"program"};
   if(/Cashback/i.test(g))return{key:"cashback",label:"Cashback / koin ditanggung penjual",kind:"pct",grp:"program"};
-  if(/Voucher/i.test(g))return{key:"voucher",label:"Voucher ditanggung penjual (rata-rata data)",kind:"pct",grp:"program"};
+  if(/Voucher/i.test(g))return null;/* seller voucher is entered manually in rupiah */
   if(/kampanye/i.test(g))return{key:"kampanye",label:"Biaya kampanye",kind:"pct",grp:"program"};
   if(/selisih/i.test(g))return null;
   return{key:"x-"+g,label:g,kind:"pct",grp:"program"};
@@ -1249,7 +1249,7 @@ function calcOut(){
   const keys=[];for(const c of chans)for(const l of c.X.lines)if(!keys.some(k=>k.key===l.key))keys.push(l);const GO={platform:0,program:1,ongkir:2};keys.sort((a,b)=>GO[a.grp]-GO[b.grp]);
   const grpName={platform:"Biaya platform (selalu dikenakan)",program:"Program (centang yang diikuti)",ongkir:"Ongkir"};
   let body=`<tr><td>Harga jual${chans[0].X.qty>1?` × ${num(chans[0].X.qty)}`:""}</td>${chans.map(c=>cell(c.X.omzet)).join("")}</tr>`;
-  if(chans.some(c=>c.X.vouch))body+=`<tr><td>Voucher / diskon tambahan ditanggung penjual</td>${chans.map(c=>cell(-c.X.vouch)).join("")}</tr>`;
+  if(chans.some(c=>c.X.vouch))body+=`<tr><td>Voucher ditanggung penjual <span class="hint">(diisi manual)</span></td>${chans.map(c=>cell(-c.X.vouch)).join("")}</tr>`;
   let lastG="";
   for(const k of keys){if(k.grp!==lastG){lastG=k.grp;body+=`<tr><td colspan="3" class="mut" style="font-weight:600;padding-top:10px">${grpName[k.grp]}</td></tr>`;}
     body+=`<tr><td>${esc(k.label)}</td>${chans.map(c=>{const l=c.X.lines.find(x=>x.key===k.key);if(!l)return`<td class="n mut">–</td>`;
@@ -1290,12 +1290,12 @@ V.calc=()=>{
     ${fld("pSP","Harga jual Shopee (Rp)",CALC.pSP,`placeholder="${calcDefPrice(p,p&&calcActual(p.id,SP))}"`)}
     ${fld("qty","Jumlah per pesanan",CALC.qty,'min="1" step="1"')}
     ${fld("hpp","HPP per unit (kosongkan = dari Harga & Margin)",CALC.hpp,`placeholder="${p?hppOf(p.id):0}"`)}
-    ${fld("vTT","Voucher/diskon tambahan TikTok (Rp/pesanan)",CALC.vTT)}
-    ${fld("vSP","Voucher/diskon tambahan Shopee (Rp/pesanan)",CALC.vSP)}
+    ${fld("vTT","Voucher ditanggung penjual TikTok (Rp/pesanan)",CALC.vTT,'min="0" step="100"')}
+    ${fld("vSP","Voucher ditanggung penjual Shopee (Rp/pesanan)",CALC.vSP,'min="0" step="100"')}
     ${fld("target","Target margin (%)",CALC.target,'step="0.5"')}
     ${fld("fixed","Beban tetap per bulan (opsional, Rp)",CALC.fixed)}
     <label class="field"><span>Data potongan dari</span><select data-calc="period">${[["30","30 hari terakhir"],["90","90 hari terakhir"],["bulan",`Bulan ${mname(M())}`]].map(([v,l])=>`<option value="${v}" ${CALC.period===v?"selected":""}>${l}</option>`).join("")}</select></label>
-  </div><p class="hint">Harga jual = harga yang dibayar pembeli setelah diskon penjual (harga coret tidak dihitung). Harga kosong = rata-rata harga jual aktual produk ini di channel itu (kalau belum ada penjualan, harga jual di Harga & Margin).</p></div>
+  </div><p class="hint">Harga jual = harga setelah diskon penjual (harga coret tidak dihitung). Voucher ditanggung penjual diisi dalam rupiah per pesanan; potongan persen marketplace dihitung dari harga setelah voucher. Harga kosong = rata-rata harga jual aktual produk ini di channel itu (kalau belum ada penjualan, harga jual di Harga & Margin).</p></div>
   <div id="calcOut">${calcOut()}</div>`;
 };
 V.price=()=>{
