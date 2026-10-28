@@ -1212,6 +1212,7 @@ function calcGroup(k){const g=feeGroup(k);
   if(/affiliate/i.test(g))return{key:"aff",label:"Komisi affiliate",kind:"pct",grp:"program"};
   if(/Growth Xtra/i.test(g))return{key:"growth",label:"Program Growth Xtra",kind:"pct",grp:"program"};
   if(/PayLater/i.test(g))return{key:"paylater",label:"Program PayLater",kind:"pct",grp:"program"};
+  if(/Promo XTRA/i.test(k))return{key:"promoxtra",label:"Promo XTRA",kind:"pct",grp:"program"};
   if(/Gratis Ongkir XTRA/i.test(g))return{key:"goxtra",label:"Gratis Ongkir XTRA",kind:"pct",grp:"program"};
   if(/Cashback/i.test(g))return{key:"cashback",label:"Cashback / koin ditanggung penjual",kind:"pct",grp:"program"};
   if(/Voucher/i.test(g))return null;/* seller voucher is entered manually in rupiah */
@@ -1228,6 +1229,8 @@ function calcRates(ch){const [a,b]=calcRange(),C={};let n=0,G=0;
       const c=C[g.key]||={...g,s:0,n:0,g:0};c.s+=v;if(!seen[g.key]){seen[g.key]=1;c.n++;c.g+=t.gross;}}}
   const rows=Object.values(C).filter(c=>Math.abs(c.s)>=1).map(c=>({...c,part:n?c.n/n:0,rate:c.g?c.s/c.g:0,per:c.kind==="order"?(n?c.s/n:0):(c.n?c.s/c.n:0)}))
     .sort((x,y)=>({platform:0,program:1,ongkir:2}[x.grp]-{platform:0,program:1,ongkir:2}[y.grp])||Math.abs(y.s)-Math.abs(x.s));
+  /* Promo XTRA+ (Shopee, official rate, all categories incl. kecantikan): 6.5% of price after seller discount/voucher, max Rp80.000 per product quantity; replaces the Promo XTRA fee */
+  if(ch===SP)rows.splice(rows.findIndex(r=>r.grp==="ongkir")<0?rows.length:rows.findIndex(r=>r.grp==="ongkir"),0,{key:"promoxtraplus",label:"Promo XTRA+ (menggantikan Promo XTRA)",kind:"pct",grp:"program",rate:0.065,cap:80000,part:0,official:true,s:0,n:0,g:0});
   return{ch,n,G,avg:n?G/n:0,rows,from:a,to:b};}
 const calcOn=(ch,r)=>{const k=ch+"|"+r.key;return r.grp!=="program"?true:k in CALC.on?!!CALC.on[k]:r.part>=0.5;};
 /* actual average selling price and order count of a product per channel in the period */
@@ -1237,7 +1240,9 @@ function calcActual(pid,ch){const [a,b]=calcRange();let q=0,v=0,n=0;
 const calcDefPrice=(p,A)=>A&&A.units?Math.round(A.price/100)*100:(p?+p.price||0:0);
 function calcOne(ch,R,price,hpp){const qty=Math.max(1,+CALC.qty||1),omzet=price*qty,vouch=+(ch===TT?CALC.vTT:CALC.vSP)||0,base=Math.max(0,omzet-vouch);
   let pct=0,fixed=0;const lines=[];
-  for(const r of R.rows){const on=calcOn(ch,r);let v=0;if(on){if(r.kind==="pct"){v=base*r.rate;pct+=r.rate;}else{v=r.per;fixed+=r.per;}}lines.push({...r,on,v});}
+  const plus=R.rows.some(r=>r.key==="promoxtraplus"&&calcOn(ch,r));
+  for(const r of R.rows){const rep=plus&&r.key==="promoxtra",on=calcOn(ch,r)&&!rep;let v=0;
+    if(on){if(r.kind==="pct"){v=base*r.rate;if(r.cap&&v>r.cap*qty)v=r.cap*qty;else pct+=r.rate;}else{v=r.per;fixed+=r.per;}}lines.push({...r,on,v,rep});}
   const cost=hpp*qty,fees=lines.reduce((a,l)=>a+l.v,0),laba=base-fees-cost,margin=omzet?laba/omzet:0;
   const be=pct<1?(fixed+cost+vouch)/(1-pct)/qty:0,tg=(+CALC.target||0)/100,tgt=pct+tg<1?(fixed+cost+vouch)/(1-pct-tg)/qty:0;
   return{qty,omzet,vouch,base,lines,cost,fees,laba,margin,be,tgt,roas:laba>0?omzet/laba:0};}
@@ -1253,9 +1258,9 @@ function calcOut(){
   let lastG="";
   for(const k of keys){if(k.grp!==lastG){lastG=k.grp;body+=`<tr><td colspan="3" class="mut" style="font-weight:600;padding-top:10px">${grpName[k.grp]}</td></tr>`;}
     body+=`<tr><td>${esc(k.label)}</td>${chans.map(c=>{const l=c.X.lines.find(x=>x.key===k.key);if(!l)return`<td class="n mut">–</td>`;
-      const info=l.kind==="pct"?`${pc(l.rate)}${l.grp==="program"?` · ${Math.round(l.part*100)}% pesanan`:""}`:`rata-rata per pesanan`;
+      const info=l.official?`${pc(l.rate)} · tarif resmi, maks ${rp(l.cap)}/produk`:l.kind==="pct"?`${pc(l.rate)}${l.grp==="program"?` · ${Math.round(l.part*100)}% pesanan`:""}`:`rata-rata per pesanan`;
       const box=l.grp==="program"?`<input type="checkbox" data-calcfee="${esc(c.ch+"|"+l.key)}" ${l.on?"checked":""} aria-label="${esc(l.label)} ${esc(c.ch)}"> `:"";
-      return`<td class="n"><label style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">${box}<span class="hint">${info}</span></label><div class="${l.on&&l.v>0?"neg":l.on?"":"mut"}">${l.on?(l.v>0?"−"+R0(l.v):R0(-l.v)):"tidak ikut"}</div></td>`;}).join("")}</tr>`;}
+      return`<td class="n"><label style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">${box}<span class="hint">${info}</span></label><div class="${l.on&&l.v>0?"neg":l.on?"":"mut"}">${l.on?(l.v>0?"−"+R0(l.v):R0(-l.v)):l.rep?"diganti Promo XTRA+":"tidak ikut"}</div></td>`;}).join("")}</tr>`;}
   body+=`<tr><td>Total potongan marketplace</td>${chans.map(c=>`<td class="n neg">−${R0(c.X.fees)} <span class="hint">(${pc(c.X.omzet?c.X.fees/c.X.omzet:0)})</span></td>`).join("")}</tr>`;
   body+=`<tr><td>HPP${chans[0].X.qty>1?` × ${num(chans[0].X.qty)}`:""} <span class="hint">${CALC.hpp!==""&&CALC.hpp!=null?"(diisi manual)":"(dari Harga & Margin)"}</span></td>${chans.map(c=>cell(-c.X.cost)).join("")}</tr>`;
   body+=`<tr style="font-weight:700"><td>Laba per pesanan (sebelum iklan)</td>${chans.map(c=>`<td class="n ${c.X.laba<0?"neg":"pos"}">${c.X.laba<0?"−"+R0(-c.X.laba):R0(c.X.laba)}</td>`).join("")}</tr>`;
@@ -1276,7 +1281,7 @@ function calcOut(){
     </tbody></table></div>
     <p class="hint">${!sim.some(s=>s.n)?"Isi jumlah pesanan per bulan untuk melihat simulasinya.":tL-fx>0?`Anggaran iklan maksimal per bulan supaya masih impas: <b>${rp(tL-fx)}</b> (ROAS impas gabungan ${(tO/(tL-fx)).toFixed(2).replace(".",",")}).`:"Belum menutup beban, bahkan sebelum biaya iklan."} Jumlah pesanan awal = rata-rata penjualan produk ini 30 hari per channel; ubah angkanya untuk simulasi.</p></div>`;
   return`<div class="panel"><h3>Hasil per pesanan</h3><div class="tbl"><table>${head}<tbody>${body}</tbody></table></div>${act}
-  <p class="hint">Persentase biaya = rata-rata potongan yang benar-benar terpotong di file income (pesanan yang sudah cair dalam periode, pesanan yang sebagian besar dikembalikan tidak dihitung). Persen program = tarif saat pesanan ikut program; "% pesanan" = seberapa sering program itu kena. Biaya tetap per pesanan (pemrosesan, ongkir) memakai rata-rata rupiah per pesanan. Biaya iklan tidak dimasukkan.</p></div>${simT}`;
+  <p class="hint">Persentase biaya = rata-rata potongan yang benar-benar terpotong di file income (pesanan yang sudah cair dalam periode, pesanan yang sebagian besar dikembalikan tidak dihitung). Persen program = tarif saat pesanan ikut program; "% pesanan" = seberapa sering program itu kena. Biaya tetap per pesanan (pemrosesan, ongkir) memakai rata-rata rupiah per pesanan. Promo XTRA+ memakai tarif resmi Shopee 6,5% (semua kategori termasuk kecantikan, maks Rp80.000 per produk, dari harga setelah diskon/voucher penjual), menggantikan biaya Promo XTRA biasa. Biaya iklan tidak dimasukkan.</p></div>${simT}`;
 }
 V.calc=()=>{
   if(!CALC_OK())return`<div class="row"><h2>Kalkulator laba</h2></div>`+emptyBox("Tidak ada akses","Kalkulator laba hanya bisa dibuka CEO.");
