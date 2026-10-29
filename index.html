@@ -955,6 +955,9 @@ function perfFindings(P,mode,day){
     if(X.rate<0.1)add("warn","Pembeli repeat masih sedikit",`Hanya ${pc(X.rate)} pembeli bulan ini yang sudah membeli ≥2 kali; omzet dari mereka ${pc(X.G?X.GR/X.G:null)}. Hampir semua penjualan harus "dibeli" lewat iklan.`,["Sisipkan kartu + voucher pembelian kedua di setiap paket",X.gapMed!=null?`Kirim pengingat/voucher sekitar ${num(X.gapMed)} hari setelah pembelian pertama`:"Follow-up pembeli lewat chat toko 2–3 minggu setelah barang diterima","Lihat daftar pembeli setia di modul Pelanggan"],"30");
     else add("good","Pembeli repeat sehat",`${pc(X.rate)} pembeli bulan ini sudah membeli ≥2 kali, menyumbang ${pc(X.G?X.GR/X.G:null)} omzet mereka.`,["Pertahankan program pembeli ulang dan tawarkan paket lebih besar ke mereka"],"90");}}
   /* 9. receivables */
+  if(mode==="bulan"&&(!P.C||P.C===TT)){const r=ttLatest("ttshop",P.m+"-01",endOf(P.m)),c=r?.summary?.chg||{},f=v=>v==null?"–":(v>0?"+":"")+v.toFixed(1).replace(".",",")+"%";
+    if(r&&c.gmv!=null&&c.gmv<=-20)add("bad","Trafik TikTok turun tajam",`Analisis Data Toko TikTok ${fdate(r.from)}–${fdate(r.to)} dibanding ${r.summary.cmp}: GMV ${f(c.gmv)}, impresi produk ${f(c.impr)}, klik ${f(c.clicks)}, sedangkan konversi klik → pesanan ${f(c.ctor)} dan tambah ke keranjang ${f(c.atcr)}. Masalah utamanya jumlah orang yang melihat produk, bukan kemampuan produk menjual. GMV dari kreator/afiliasi ${f(c.gmvCreator)}, LIVE penjual ${f(c.gmvLive)}, video penjual ${f(c.gmvVideo)}, kartu produk ${f(c.gmvCard)}.`,["Cek kreator/afiliasi yang dulu paling banyak menjual: apakah berhenti posting? Kirim sampel baru dan tawarkan komisi lebih tinggi ke mereka","Tambah kreator baru lewat open collaboration dan target collaboration","Jadwalkan LIVE dan video penjual rutin setiap hari","Cek GMV Max: target ROAS yang terlalu tinggi atau budget kecil membuat tayangan iklan sedikit","Cek Kesehatan Akun/penalti produk di Seller Center yang bisa menurunkan distribusi"],"7");
+    else if(r&&c.gmv!=null&&c.gmv>=20)add("good","Trafik TikTok naik",`GMV ${f(c.gmv)}, impresi ${f(c.impr)}, klik ${f(c.clicks)} dibanding ${r.summary.cmp}.`,["Pertahankan sumber yang naik paling tinggi dan tambah stok sesuai kenaikan"],"30");}
   if(!P.C){const R=receivables(endOf(P.m)),ar=MP.reduce((a,c)=>a+recvTotal(R,c),0);if(ar>g*0.3)add("info","Piutang marketplace besar",`Dana belum cair ${rp0(ar)} (${pc(ar/g)} dari omzet bulan ini).`,["Pantau pencairan rutin dan impor file income tiap hari","Rencanakan pembelian stok dari dana yang sudah cair saja"],"30");}
   return F;
 }
@@ -1542,6 +1545,44 @@ function parseShopeeMeta(rows,name){
   const from=out.map(x=>x.from).sort()[0]||asOf;
   return{kind:"report",ch:SP,rkind:"shopeemeta",name,label:"Iklan afiliasi Shopee di Meta",rows:out,from,to:asOf};
 }
+/* TikTok "Analisis Data Toko": shop key metrics (Summary + Trend) and the product list with GMV per source */
+const ttNum=v=>{const t=clean(v);if(!t||t==="-"||t==="--")return null;return nvi(t.replace(/^Rp\s?/,""));};
+const TTF={gmv:"GMV",orders:"Pesanan",units:"Produk terjual",buyers:"Est. pembeli",aov:"AOV (pesanan SKU)",impr:"Impresi produk",clicks:"Klik produk",ctr:"CTR",atc:"Jumlah tambahkan ke keranjang",atcr:"Persentase tambahkan ke keranjang",ctor:"CTOR (pesanan SKU)",refund:"Pengembalian dana",gmvShopTab:"GMV tab Toko",gmvLive:"GMV dari LIVE penjual",gmvVideo:"GMV dari video penjual",gmvCard:"GMV kartu produk penjual",gmvCreator:"GMV dari kreator"};
+const ttPick=r=>Object.fromEntries(Object.entries(TTF).map(([k,h])=>[k,ttNum(r[h])]));
+function parseTTShop(wb,name){
+  const sum=sheetRows(wb.Sheets["Summary"]),tr=sheetRows(wb.Sheets["Trend"]);
+  const dl=sum.flat().map(clean).find(c=>/Analysis date|Tanggal analisis/i.test(c))||"",cl=sum.flat().map(clean).find(c=>/^Compare|Bandingkan/i.test(c))||"";
+  const dm=/(\d{2})\/(\d{2})\/(\d{4})\D+(\d{2})\/(\d{2})\/(\d{4})/.exec(dl),cm=/(\d{2}\/\d{2}\/\d{4})\D+(\d{2}\/\d{2}\/\d{4})/.exec(cl);
+  const T=table(sum,"Total nilai")?null:null;const hi=sum.findIndex(r=>clean(r[0])==="Total nilai")-1,h=hi>=0?sum[hi].map(clean):[];
+  const rowObj=r=>{const o={};h.forEach((k,j)=>{if(k&&!(k in o))o[k]=clean(r[j]);});return o;};
+  const tot=hi>=0?ttPick(rowObj(sum[hi+1])):{},chgRow=sum.find(r=>/Perkembangan/i.test(clean(r[0]))),chg=chgRow?ttPick(rowObj(chgRow)):{};
+  const rows=(table(tr,"Tanggal")||[]).map(r=>({date:ymd(r["Tanggal"]),...ttPick(r)})).filter(r=>r.date);
+  const per=dm?[`${dm[3]}-${dm[2]}-${dm[1]}`,`${dm[6]}-${dm[5]}-${dm[4]}`]:[rows[0]?.date||today(),rows[rows.length-1]?.date||today()];
+  return{kind:"report",ch:TT,rkind:"ttshop",name,label:"Analisis data toko TikTok (trafik & sumber GMV)",rows,summary:{tot,chg,cmp:cm?`${cm[1]}–${cm[2]}`:""},from:per[0],to:per[1]};
+}
+function parseTTProd(first,name){
+  const dl=first.flat().map(clean).find(c=>/Tanggal analisis/i.test(c))||"",dm=/(\d{2})\/(\d{2})\/(\d{4})\D+(\d{2})\/(\d{2})\/(\d{4})/.exec(dl);
+  const rows=(table(first,"ID Produk")||[]).filter(r=>r["Nama"]).map(r=>({name:clean(r["Nama"]).replace(/\s+/g," ").slice(0,90),id:clean(r["ID Produk"]),...ttPick(r)})).filter(r=>r.gmv||r.impr);
+  const per=dm?[`${dm[3]}-${dm[2]}-${dm[1]}`,`${dm[6]}-${dm[5]}-${dm[4]}`]:[today(),today()];
+  return{kind:"report",ch:TT,rkind:"ttprod",name,label:"Daftar produk TikTok (trafik & sumber GMV per produk)",rows,from:per[0],to:per[1]};
+}
+function ttLatest(kind,start,end){return S.adsreports.filter(r=>r.kind===kind&&(r.ch||TT)===TT&&r.from<=end&&r.to>=start).sort((a,b)=>b.to.localeCompare(a.to)||mdays(b.from,b.to)-mdays(a.from,a.to))[0];}
+function ttShopPanel(start,end){const r=ttLatest("ttshop",start,end),p=ttLatest("ttprod",start,end);if(!r&&!p)return"";
+  const P=v=>v==null?"–":v.toFixed(2).replace(".",",")+"%",N=v=>v==null?"–":num(v),G=v=>v==null?"–":rp0(v);
+  let h=`<div class="panel"><div class="row"><h3>Trafik & sumber GMV toko TikTok</h3><div class="sp"></div><span class="hint">Analisis Data Toko ${fdate((r||p).from)} – ${fdate((r||p).to)}${r?.summary?.cmp?` · dibanding ${esc(r.summary.cmp)}`:""}</span></div>`;
+  if(r){const t=r.summary.tot||{},c=r.summary.chg||{},ch=k=>c[k]==null?"":`<span class="${c[k]<0?"neg":"pos"}">${c[k]>0?"+":""}${c[k].toFixed(1).replace(".",",")}%</span>`;
+    const K=[["GMV","gmv",G],["Pesanan","orders",N],["Impresi produk","impr",N],["Klik produk","clicks",N],["CTR (klik ÷ impresi)","ctr",P],["Tambah ke keranjang","atcr",P],["Konversi klik → pesanan","ctor",P],["Pengembalian dana","refund",G]];
+    h+=`<div class="kpis">${K.map(([l,k,f])=>`<div class="kpi"><span>${l}</span><b>${f(t[k])}</b><span>${c[k]!=null?`${ch(k)} vs periode pembanding`:"&nbsp;"}</span></div>`).join("")}</div>`;
+    const src=[["Kreator / afiliasi","gmvCreator"],["LIVE penjual","gmvLive"],["Video penjual","gmvVideo"],["Kartu produk penjual","gmvCard"]],g=t.gmv||0,rest=g-src.reduce((a,[,k])=>a+(t[k]||0),0);
+    h+=`<div class="tbl" style="margin-top:12px"><table><thead><tr><th>Sumber GMV</th><th class="n">GMV</th><th class="n">Porsi</th><th class="n">Perubahan</th></tr></thead><tbody>
+      ${src.map(([l,k])=>`<tr><td>${l}</td><td class="n">${G(t[k])}</td><td class="n">${g?((t[k]||0)/g*100).toFixed(1).replace(".",",")+"%":"–"}</td><td class="n">${ch(k)}</td></tr>`).join("")}
+      ${Math.abs(rest)>=1?`<tr><td class="mut">Lainnya (pencarian, dll.)</td><td class="n mut">${G(rest)}</td><td class="n mut">${g?(rest/g*100).toFixed(1).replace(".",",")+"%":"–"}</td><td></td></tr>`:""}
+      </tbody></table></div><p class="hint">GMV di sini versi TikTok (sebelum potongan dan retur), jadi bisa berbeda dari omzet tercatat di aplikasi. "Tab Toko" (${G(t.gmvShopTab)}) adalah tempat pembeli melihat produk, bisa tumpang tindih dengan sumber di atas.</p>`;}
+  if(p&&p.rows.length){h+=`<div class="tbl" style="margin-top:12px"><table><thead><tr><th>Produk</th><th class="n">GMV</th><th class="n">Pesanan</th><th class="n">Impresi</th><th class="n">Klik</th><th class="n">CTR</th><th class="n">Klik → pesanan</th><th class="n">Dari kreator</th><th class="n">Dana dikembalikan</th></tr></thead><tbody>
+    ${p.rows.slice().sort((a,b)=>(b.gmv||0)-(a.gmv||0)).slice(0,15).map(x=>`<tr><td class="wrapcell">${esc(x.name.replace(/Kiso Crystal Brightening Soap.*/i,"").trim()||x.name.slice(0,40))}</td><td class="n">${G(x.gmv)}</td><td class="n">${N(x.orders)}</td><td class="n">${N(x.impr)}</td><td class="n">${N(x.clicks)}</td><td class="n">${P(x.ctr)}</td><td class="n">${x.clicks?P((x.orders||0)/x.clicks*100):"–"}</td><td class="n">${x.gmv?((x.gmvCreator||0)/x.gmv*100).toFixed(0)+"%":"–"}</td><td class="n">${G(x.refund)}</td></tr>`).join("")}
+    </tbody></table></div><p class="hint">Per produk dari file daftar produk (${fdate(p.from)} – ${fdate(p.to)}). Klik → pesanan = pesanan ÷ klik produk.</p>`;}
+  return h+`</div>`;
+}
 function parseShopeeBill(first,name){
   const tl=first.find(r=>/^Tanggal/i.test(clean(r[0]))),pm=tl&&/(\d{2})\/(\d{2})\/(\d{4})\s*-+\s*(\d{2})\/(\d{2})\/(\d{4})/.exec(clean(tl[1])),days={};
   for(const r of table(first,"Urutan")||[]){const d=ymd(r["Waktu"]),desc=clean(r["Deskripsi"]),a=nv(r["Jumlah"]);if(!d||!a)continue;
@@ -1737,6 +1778,8 @@ async function analyze(file){
     if(hdr.has("Klik Unik")&&hdr.has("Waktu"))return parseAds("cardtraffic",t("Waktu"),file.name);
     if(hdr.has("Siaran LIVE")&&hdr.has("Waktu"))return parseAds("livedaily",t("Waktu"),file.name);
     if(hdr.has("SKU ID")&&hdr.has("Produk terjual"))return{kind:"skip",name:file.name,label:"Daftar SKU",why:"Penjualan per SKU sudah dihitung dari file pesanan."};
+    if(wb.SheetNames.includes("Summary")&&wb.SheetNames.includes("Trend")&&first.flat().some(c=>/Analysis date|Tanggal analisis/i.test(clean(c))))return parseTTShop(wb,file.name);
+    if(first.slice(0,4).some(r=>/Tanggal analisis/i.test(clean(r[0])))&&first.some(r=>r.map(clean).includes("ID Produk")&&r.map(clean).includes("GMV dari kreator")))return parseTTProd(first,file.name);
     if(first.slice(0,4).some(r=>/Tanggal analisis/i.test(clean(r[0])))||(first[2]||[]).length>100)return{kind:"skip",name:file.name,label:"Daftar produk per saluran",why:"Omzet per saluran (video, LIVE, kartu produk, afiliasi) sudah dihitung dari file pesanan."};
     /* Product/Live campaign exports may carry a "Per Hari" column too (one row per campaign per day); only the shop-wide overview is the daily ad total */
     if(hdr.has("Per Hari")&&!hdr.has("ID Campaign")&&!hdr.has("Anggaran saat ini"))return parseAds("adsdaily",t("Per Hari"),file.name);
@@ -1780,6 +1823,8 @@ function impHtml(busy){
       ${x.hasEarn?`<div class="hint">Cek silang: total dana masuk saldo TikTok di sheet Riwayat ${rp(x.earn)} ${Math.abs(x.earn-x.sum)<1?"cocok dengan detail pesanan":`berbeda ${rp(x.earn-x.sum)} dari detail pesanan`}. Semua dana ini masuk ke rekening Saldo TikTok Shop.</div>`:""}
       <div class="hint">${x.ch===SP?"Saat saldo Shopee ditarik ke bank, catat sebagai transfer Saldo Shopee → rekening bank di tab Bank & Kas.":x.withdrawals.length?`${num(x.withdrawals.length)} penarikan ke bank (${rp(ws)}), ${num(wNew)} belum tercatat → dicatat sebagai transfer dari Saldo TikTok Shop ke rekening di bawah.`:"Tidak ada penarikan ke bank di file ini. Saat kamu menarik saldo TikTok ke bank, catat sebagai transfer Saldo TikTok Shop → rekening bank di tab Bank & Kas."}</div>`;}
     }else if(x.kind==="report"&&x.rkind==="shopeesource"){d=`<div>${fdate(x.from)} – ${fdate(x.to)} · penjualan ${rp(x.summary.sales)}, ${num(x.summary.visitors)} pengunjung. Dipakai untuk analitik sumber penjualan saja.</div>`;
+    }else if(x.kind==="report"&&(x.rkind==="ttshop"||x.rkind==="ttprod")){const t=x.rkind==="ttshop"?x.summary.tot:null,c=x.summary?.chg||{};
+      d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${t?`GMV ${rp0(t.gmv||0)} · ${num(t.orders||0)} pesanan · ${num(t.impr||0)} impresi · ${num(t.clicks||0)} klik${c.gmv!=null?` · GMV ${c.gmv>0?"+":""}${c.gmv.toFixed(1).replace(".",",")}% vs ${esc(x.summary.cmp)}`:""}`:`${num(x.rows.length)} produk`}.</div><div class="hint">Untuk analitik saja (tab Iklan & Analitik → TikTok Shop, dan Analisa Kinerja). Tidak mengubah omzet, saldo, atau stok.</div>`;
     }else if(x.kind==="report"&&x.rkind==="shopeemeta"){const t=k=>x.rows.reduce((a,r)=>a+(+r[k]||0),0);d=`<div>${num(x.rows.length)} iklan · ${fdate(x.from)} – ${fdate(x.to)} · biaya ${rp(t("spend"))} · penjualan ${rp(t("gmv"))} (${num(t("orders"))} pesanan) · ROAS ${t("spend")?(t("gmv")/t("spend")).toFixed(2):"–"}.</div><div class="hint">Angka di file ini total sejak iklan mulai, jadi file terbaru menggantikan yang lama. Biaya dibagi rata per hari sejak iklan mulai, masuk biaya Iklan Shopee, dan mengurangi rekening Saldo Iklan Meta (Shopee). Isi saldonya diambil dari file transaksi saldo penjual (isi ulang yang tidak ada di riwayat saldo iklan Shopee).</div>`;
     }else if(x.kind==="report"&&x.rkind==="shopeebal"){const st=S.settles.filter(d=>d.ch===SP).map(d=>d.date).sort()[0]||"",use=x.rows.filter(r=>r.d>=st),sum=f=>use.filter(f).reduce((a,r)=>a+r.a,0);
       d=`<div>${fdate(x.from)} – ${fdate(x.to)} · saldo akhir di file ${rp(x.summary.end||0)}. Dipakai mulai ${fdate(st)}: isi ulang saldo iklan/koin ${rp(-sum(r=>r.ty==="Pembayaran dengan Saldo Penjual"))}, penyesuaian ${rp(sum(r=>r.ty==="Penyesuaian"))}, penarikan dana ${rp(-sum(r=>r.ty==="Penarikan Dana"))}.</div><div class="hint">Penghasilan pesanan tidak diambil dari file ini (sudah dari file Income). Isi ulang dicocokkan dengan riwayat saldo iklan: selisih 11% dicatat sebagai PPN iklan, sisanya sebagai Koin Penjual. Penarikan dana yang sudah dicatat manual sebagai transfer tidak dicatat dua kali.</div>`;
@@ -2142,6 +2187,7 @@ V.adsTT=()=>{
   ${noHpp?`<div class="banner">Sebagian produk belum punya HPP, sehingga margin dan ROAS impas terlihat lebih bagus dari kenyataan.</div>`:""}
   <p class="hint">ROAS impas = 1 ÷ margin kontribusi (omzet − potongan & retur marketplace − HPP). ROAS di atas angka ini berarti iklan masih untung. Biaya iklan di laba rugi = pemakaian harian dari file Campaign overview. Pembayarannya (potongan GMV Pay dari saldo TikTok, atau top-up dari bank yang kamu catat sebagai transfer ke Saldo Iklan TikTok) diperlakukan sebagai uang muka. Saldo Iklan TikTok: <b>${rp(adsBal)}</b>${adsBal<0?" → minus berarti ada pembayaran iklan yang belum tercatat. Catat top-up iklan sebagai transfer dari rekening bank ke Saldo Iklan TikTok, bukan sebagai beban, supaya tidak terhitung dua kali.":"."}</p>
   ${days.length?`<div class="panel"><div><h3>Biaya iklan vs GMV dari iklan per hari (Rp)</h3><p class="hint" style="margin:4px 0 0">Batang hijau = penjualan yang dihasilkan iklan (GMV), batang ungu = biaya iklan hari itu. Semakin tinggi batang hijau dibanding ungu, semakin baik. Arahkan kursor atau ketuk untuk melihat ROAS harian.</p></div>${adsChart(days)}</div>`:""}
+  ${ttShopPanel(start,end)}
   <div class="grid2">
     <div class="panel"><h3>Penjualan TikTok per sumber</h3>
       ${tto.length?`<div class="tbl"><table><thead><tr><th>Sumber</th><th class="n">Pesanan</th><th class="n">Omzet</th><th class="n">Porsi</th></tr></thead><tbody>${top(bySrc).map(([k,v])=>`<tr><td>${esc({Videos:"Video",["Product cards"]:"Kartu produk",LIVE:"LIVE"}[k]||k)}</td><td class="n">${num(v.n)}</td><td class="n">${rp(v.g)}</td><td class="n">${pct(v.g,g)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="empty">Belum ada pesanan TikTok yang diimpor.</div>`}
