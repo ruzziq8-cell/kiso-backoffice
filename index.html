@@ -180,6 +180,7 @@ dialog form{display:grid;gap:14px;padding:18px}
       <button role="tab" data-tab="cost">Beban & Aset</button>
       <button role="tab" data-tab="bank">Bank & Kas</button>
       <button role="tab" data-tab="ar">Piutang</button>
+      <button role="tab" data-tab="emp">Piutang Karyawan</button>
       <button role="tab" data-tab="ads">Iklan & Analitik</button>
       <button role="tab" data-tab="report">Laporan</button>
       <button role="tab" data-tab="set">Pengaturan</button>
@@ -265,7 +266,7 @@ function spBill(){const B={};for(const r of S.adsreports.filter(r=>r.kind==="sho
 const mdays=(a,b)=>Math.round((new Date(b+"T00:00")-new Date(a+"T00:00"))/864e5)+1;
 /* ad spend of a period report attributed to a month in proportion to the days that fall in it */
 function shopeeAdSpend(m){const a=m+"-01",b=endOf(m);let t=metaAdSpend(a,b);for(const r of shopeeAdsSet()){const f=r.from>a?r.from:a,e=r.to<b?r.to:b;if(f<=e)t+=r.spend*mdays(f,e)/r.len;}return t;}
-const COLLS=["customers","products","materials","production","orders","purchases","cash","moves","accounts","transfers","receipts","recurring","orderdays","settles","adsdaily","adsreports","returns","supreturns","suppliers","appay","apopen"];
+const COLLS=["customers","emploans","products","materials","production","orders","purchases","cash","moves","accounts","transfers","receipts","recurring","orderdays","settles","adsdaily","adsreports","returns","supreturns","suppliers","appay","apopen"];
 
 const S={settings:{storeName:"KISO.ID"},loaded:{},db:null,canWrite:true,team:[],teamreq:[]};
 COLLS.forEach(c=>S[c]=[]);
@@ -284,7 +285,7 @@ document.getElementById("themeBtn")?.addEventListener("click",()=>{const i=THEME
    Write protection for view-only accounts is enforced by claude.ai; module hiding for editors is a display rule. ---------- */
 const ROLES={
   ceo:{name:"CEO",tabs:"*",write:true,desc:"Melihat dan mengubah semua modul, termasuk Kalkulator Laba (khusus CEO)"},
-  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","ads","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
+  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","emp","ads","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
   gudang:{name:"Gudang",tabs:["stock"],write:true,desc:"Hanya modul Stok (melihat dan mengubah)"},
   pemilik:{name:"Pemilik",tabs:"*",write:false,desc:"Melihat semua modul (kecuali Kalkulator Laba), tidak bisa mengubah apa pun"},
 };
@@ -434,6 +435,7 @@ function ledger(){
   for(const t of S.transfers){L.push({date:t.date,acc:t.from,amt:-(+t.amount||0),desc:`Transfer ke ${aname(t.to)}${t.note?" · "+t.note:""}`,kind:"transfer",id:t.id});L.push({date:t.date,acc:t.to,amt:+t.amount||0,desc:`Transfer dari ${aname(t.from)}${t.note?" · "+t.note:""}`,kind:"transfer",id:t.id});}
   for(const r of S.receipts)if(r.type==="pencairan")L.push({date:r.date,acc:r.account,amt:+r.amount||0,desc:`Pencairan ${r.channel} · pesanan ${mshort(r.period)}${r.note?" · "+r.note:""}`,kind:"receipt",id:r.id});
   for(const o of S.orders)if(!MP.includes(o.channel)&&counts(o)&&o.account)L.push({date:o.date,acc:o.account,amt:orderTotals(o).net,desc:`Penjualan ${o.channel}${o.ref?" · "+o.ref:""}`,kind:"order",id:o.id});
+  for(const x of S.emploans)if(x.account&&+x.amount)L.push({date:x.date,acc:x.account,amt:x.type==="bayar"?+x.amount:-(+x.amount),desc:x.type==="bayar"?`${x.method==="gaji"?"Potong gaji":"Bayar kasbon"} · ${x.emp}${x.note?" · "+x.note:""}`:`Kasbon karyawan · ${x.emp}${x.note?" · "+x.note:""}`,kind:"emploan",id:x.id});
   for(const p of S.appay)L.push({date:p.date,acc:p.account,amt:-(+p.amount||0),desc:`Bayar hutang ${supName(p.supplier)}${p.note?" · "+p.note:""}`,kind:"appay",id:p.id});
   for(const r of S.supreturns)if(r.settle==="refund"&&r.account)L.push({date:r.date,acc:r.account,amt:sretTotal(r),desc:`Refund retur ke supplier ${r.supplier||""}`,kind:"sret",id:r.id});
   for(const b of S.purchases)if(b.paid&&b.status!=="batal"&&b.payAccount)L.push({date:b.payDate||b.date,acc:b.payAccount,amt:-buyTotal(b),desc:`Bayar supplier ${b.supplier||""}`,kind:"buy",id:b.id});
@@ -1306,6 +1308,32 @@ V.calc=()=>{
   </div><p class="hint">Harga jual = harga setelah diskon penjual (harga coret tidak dihitung). Voucher ditanggung penjual diisi dalam rupiah per pesanan; potongan persen marketplace dihitung dari harga setelah voucher. Harga kosong = rata-rata harga jual aktual produk ini di channel itu (kalau belum ada penjualan, harga jual di Harga & Margin).</p></div>
   <div id="calcOut">${calcOut()}</div>`;
 };
+/* ---------- Piutang karyawan: kasbon/pinjaman karyawan dan pembayarannya (tunai/transfer atau potong gaji) ---------- */
+function empState(asOf="9999-12-31"){const E={};
+  for(const x of S.emploans){if((x.date||"")>asOf||!x.emp)continue;const k=skey(x.emp),e=E[k]||={name:x.emp,loan:0,paid:0,plan:0,lastLoan:"",lastPay:"",n:0};e.n++;
+    if(x.type==="bayar"){e.paid+=+x.amount||0;if(x.date>e.lastPay)e.lastPay=x.date;}else{e.loan+=+x.amount||0;if(x.date>=e.lastLoan){e.lastLoan=x.date;e.plan=+x.plan||e.plan;}}}
+  for(const e of Object.values(E))e.left=e.loan-e.paid;return E;}
+const empTotal=asOf=>Object.values(empState(asOf)).reduce((a,e)=>a+Math.max(0,e.left),0);
+V.emp=()=>{
+  const end=endOf(M()),E=empState(end),list=Object.values(E).sort((a,b)=>(b.left>0.5)-(a.left>0.5)||b.left-a.left||a.name.localeCompare(b.name));
+  const tot=list.reduce((a,e)=>a+Math.max(0,e.left),0),owing=list.filter(e=>e.left>=0.5),mon=S.emploans.filter(inMonth).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const mLoan=mon.filter(x=>x.type!=="bayar").reduce((a,x)=>a+(+x.amount||0),0),mPay=mon.filter(x=>x.type==="bayar").reduce((a,x)=>a+(+x.amount||0),0);
+  const head=`<div class="row"><h2>Piutang karyawan</h2><div class="sp"></div>${btn("emppay","+ Pembayaran / potong gaji")}${btn("emploan","+ Kasbon / pinjaman",1)}</div>
+  <p class="hint">Catat kasbon atau pinjaman karyawan dan cicilannya. Kasbon bukan beban: uangnya keluar dari rekening, tapi tercatat sebagai piutang (aset) sampai dibayar kembali.</p>`;
+  if(!S.emploans.length)return head+emptyBox("Belum ada kasbon karyawan","Klik “+ Kasbon / pinjaman” untuk mencatat uang yang dipinjam karyawan.");
+  return head+`<div class="kpis">
+    <div class="kpi"><span>Total piutang karyawan</span><b>${rp(tot)}</b><span>per ${fdate(end)}</span></div>
+    <div class="kpi"><span>Karyawan masih berutang</span><b>${num(owing.length)}</b><span>dari ${num(list.length)} karyawan</span></div>
+    <div class="kpi"><span>Kasbon ${esc(mshort(M()))}</span><b>${rp(mLoan)}</b><span>${num(mon.filter(x=>x.type!=="bayar").length)} kali</span></div>
+    <div class="kpi"><span>Pembayaran ${esc(mshort(M()))}</span><b>${rp(mPay)}</b><span>${num(mon.filter(x=>x.type==="bayar").length)} kali</span></div></div>
+  <div class="panel"><h3>Saldo per karyawan</h3><div class="tbl"><table><thead><tr><th>Karyawan</th><th class="n">Total kasbon</th><th class="n">Sudah dibayar</th><th class="n">Sisa</th><th class="n">Cicilan / bulan</th><th>Perkiraan lunas</th><th>Kasbon terakhir</th><th>Bayar terakhir</th></tr></thead><tbody>
+  ${list.map(e=>`<tr><td><b>${esc(e.name)}</b></td><td class="n">${rp(e.loan)}</td><td class="n">${rp(e.paid)}</td><td class="n">${e.left>=0.5?`<b>${rp(e.left)}</b>`:e.left<=-0.5?`<span class="pill warn">Lebih bayar ${rp(-e.left)}</span>`:'<span class="pill good">Lunas</span>'}</td><td class="n">${e.plan?rp(e.plan):"–"}</td><td>${e.left>=0.5&&e.plan?`±${num(Math.ceil(e.left/e.plan))} bulan lagi`:"–"}</td><td>${e.lastLoan?fdate(e.lastLoan):"–"}</td><td>${e.lastPay?fdate(e.lastPay):"–"}</td></tr>`).join("")}
+  </tbody></table></div></div>
+  <div class="panel"><h3>Riwayat ${esc(mname(M()))}</h3>${mon.length?`<div class="tbl"><table><thead><tr><th>Tanggal</th><th>Karyawan</th><th>Jenis</th><th>Rekening</th><th>Catatan</th><th class="n">Jumlah</th></tr></thead><tbody>
+  ${mon.map(x=>`<tr class="click" data-edit="emploan" data-id="${x.id}"><td>${fdate(x.date)}</td><td>${esc(x.emp)}</td><td>${x.type==="bayar"?`<span class="pill good">${x.method==="gaji"?"Potong gaji":"Bayar tunai/transfer"}</span>`:'<span class="pill warn">Kasbon</span>'}</td><td>${esc(aname(x.account)||"–")}</td><td class="wrapcell">${esc(x.note||"")}</td><td class="n ${x.type==="bayar"?"pos":"neg"}">${x.type==="bayar"?"+":"−"}${rp(+x.amount||0)}</td></tr>`).join("")}
+  </tbody></table></div>`:`<p class="hint">Belum ada kasbon atau pembayaran di bulan ini.</p>`}
+  <p class="hint">Potong gaji: catat gaji di tab Beban sebesar <b>gaji penuh</b> (sebelum dipotong), lalu catat potongannya di sini sebagai pembayaran "Potong gaji" dengan rekening yang dipakai membayar gaji. Uang yang benar-benar keluar dari rekening jadi gaji dikurangi potongan, dan sisa kasbon berkurang.</p></div>`;
+};
 V.price=()=>{
   const s=stockOf(),pl=monthPL(),prods=sortBy("products"),mats=sortBy("materials");
   return`<div class="row"><h2>Harga & margin</h2></div>
@@ -1407,9 +1435,9 @@ V.ar=()=>{
 V.report=()=>{
   const pl=monthPL(),end=endOf(M()),bal=balances(end),R=receivables(end),s=stockOf(end);
   const inv=inventoryValue(s),fixed=assetsAt(M()).reduce((a,x)=>a+x.book,0);
-  const ap=apTotal(end);
+  const ap=apTotal(end),empR=empTotal(end);
   const recv=MP.map(ch=>[ch,recvTotal(R,ch)]);
-  const cur=Object.values(bal).reduce((a,v)=>a+v,0)+recv.reduce((a,[,v])=>a+v,0)+inv;
+  const cur=Object.values(bal).reduce((a,v)=>a+v,0)+recv.reduce((a,[,v])=>a+v,0)+inv+empR;
   return`<h2>Laporan ${esc(mname(M()))}</h2>
   <div class="grid2">
    <div class="panel"><h3>Laba rugi</h3>${plHtml(pl,true)}<p class="hint">Basis akrual: penjualan diakui di bulan pesanan, walau dananya cair bulan berikutnya. Pembelian aset, modal masuk, dan prive tidak dihitung sebagai beban atau laba. Aset masuk lewat penyusutan.</p></div>
@@ -1417,6 +1445,7 @@ V.report=()=>{
     <div class="sec"><span>Aset lancar</span><span></span></div>
     ${sortAcc().map(a=>`<div class="ind"><span>${esc(a.name)}</span><span>${rp(bal[a.id])}</span></div>`).join("")}
     ${recv.map(([ch,v])=>`<div class="ind"><span>Piutang ${ch}</span><span>${rp(v)}</span></div>`).join("")}
+    ${empR?`<div class="ind"><span>Piutang karyawan</span><span>${rp(empR)}</span></div>`:""}
     <div class="ind"><span>Persediaan (${num(s.soap)} sabun + bahan)</span><span>${rp(inv)}</span></div>
     <div class="t"><span>Total aset lancar</span><span>${rp(cur)}</span></div>
     <div class="sec"><span>Aset tetap</span><span></span></div>
@@ -1431,8 +1460,8 @@ V.report=()=>{
 };
 function cashflow(){
   const start=M()+"-01",end=endOf(M()),L=ledger().filter(l=>l.date>=start&&l.date<=end&&l.kind!=="transfer");
-  const g={"Pencairan marketplace":0,"Penjualan offline":0,"Pembayaran supplier":0,"Beban & pengeluaran lain":0,"Pembelian aset tetap":0,"Pemasukan lain & modal":0};
-  for(const l of L){if(l.kind==="receipt")g["Pencairan marketplace"]+=l.amt;else if(l.kind==="order")g["Penjualan offline"]+=l.amt;else if(l.kind==="buy"||l.kind==="sret"||l.kind==="appay")g["Pembayaran supplier"]+=l.amt;else if(l.cat===ASSET)g["Pembelian aset tetap"]+=l.amt;else if(l.amt<0)g["Beban & pengeluaran lain"]+=l.amt;else g["Pemasukan lain & modal"]+=l.amt;}
+  const g={"Pencairan marketplace":0,"Penjualan offline":0,"Pembayaran supplier":0,"Beban & pengeluaran lain":0,"Pembelian aset tetap":0,"Pemasukan lain & modal":0,"Kasbon karyawan (bersih)":0};
+  for(const l of L){if(l.kind==="emploan")g["Kasbon karyawan (bersih)"]+=l.amt;else if(l.kind==="receipt")g["Pencairan marketplace"]+=l.amt;else if(l.kind==="order")g["Penjualan offline"]+=l.amt;else if(l.kind==="buy"||l.kind==="sret"||l.kind==="appay")g["Pembayaran supplier"]+=l.amt;else if(l.cat===ASSET)g["Pembelian aset tetap"]+=l.amt;else if(l.amt<0)g["Beban & pengeluaran lain"]+=l.amt;else g["Pemasukan lain & modal"]+=l.amt;}
   const net=Object.values(g).reduce((a,v)=>a+v,0);
   return`<div class="pl">${Object.entries(g).map(([k,v])=>`<div><span>${k}</span><span class="${v<0?"neg":v>0?"pos":""}">${rp(v)}</span></div>`).join("")}<div class="big"><span>Perubahan kas & bank</span><span class="${net<0?"neg":"pos"}">${rp(net)}</span></div></div>`;
 }
@@ -1980,8 +2009,8 @@ function skuStats(m,ch,from,to){
   return Object.values(P).map(r=>{const n=r.orders.size,cm=r.gross-r.fee-r.hpp,profit=cm-r.ads;return{...r,name:pname(r.id,pm),n,cm,profit,aov:n?r.gross/n:null,roas:r.ads?r.adsGmv/r.ads:null,be:cm>0?r.gross/cm:null,acos:r.adsGmv?r.ads/r.adsGmv:null,tacos:r.gross?r.ads/r.gross:null,roi:r.ads?profit/r.ads:null,margin:r.gross?profit/r.gross:null};});
 }
 /* change history (website version): every add/change/delete is logged by the database with the user's ID */
-const AUD_COLL={customers:"Data pelanggan",products:"Produk",materials:"Bahan",production:"Produksi",orders:"Pesanan manual",purchases:"Pembelian",cash:"Kas/beban",moves:"Penyesuaian stok",accounts:"Rekening",transfers:"Transfer",receipts:"Pencairan manual",recurring:"Beban rutin",orderdays:"Impor pesanan",settles:"Impor pencairan",adsdaily:"Impor iklan harian",adsreports:"Impor laporan/analitik",returns:"Retur pembeli",supreturns:"Retur ke supplier",suppliers:"Supplier",appay:"Bayar hutang",apopen:"Hutang awal",config:"Pengaturan",profiles:"Pengguna"};
-const AUD_TAB={cust:["customers"],sales:["orders","orderdays","returns"],buy:["purchases","suppliers","supreturns"],ap:["appay","apopen","suppliers","purchases"],stock:["products","materials","production","moves","returns","supreturns"],price:["products","materials"],cost:["cash","recurring"],bank:["accounts","transfers","cash"],ar:["receipts","settles","config"],ads:["adsdaily","adsreports"],set:null,dash:null,daily:["orderdays","settles","adsdaily"],report:null};
+const AUD_COLL={customers:"Data pelanggan",emploans:"Piutang karyawan",products:"Produk",materials:"Bahan",production:"Produksi",orders:"Pesanan manual",purchases:"Pembelian",cash:"Kas/beban",moves:"Penyesuaian stok",accounts:"Rekening",transfers:"Transfer",receipts:"Pencairan manual",recurring:"Beban rutin",orderdays:"Impor pesanan",settles:"Impor pencairan",adsdaily:"Impor iklan harian",adsreports:"Impor laporan/analitik",returns:"Retur pembeli",supreturns:"Retur ke supplier",suppliers:"Supplier",appay:"Bayar hutang",apopen:"Hutang awal",config:"Pengaturan",profiles:"Pengguna"};
+const AUD_TAB={cust:["customers"],emp:["emploans"],sales:["orders","orderdays","returns"],buy:["purchases","suppliers","supreturns"],ap:["appay","apopen","suppliers","purchases"],stock:["products","materials","production","moves","returns","supreturns"],price:["products","materials"],cost:["cash","recurring"],bank:["accounts","transfers","cash"],ar:["receipts","settles","config"],ads:["adsdaily","adsreports"],set:null,dash:null,daily:["orderdays","settles","adsdaily"],report:null};
 const AUD_ACT={insert:["Tambah","good"],update:["Ubah","warn"],delete:["Hapus","bad"]};
 function auditDesc(e){
   const i=e.info||{},pm=pmap(),bits=[];
@@ -2293,7 +2322,7 @@ app.addEventListener("click",e=>{
 /* ---------- forms ---------- */
 dlg.addEventListener("close",()=>{if(pendingRender){pendingRender=false;render();}});
 document.getElementById("impdlg").addEventListener("close",()=>{pendingRender=false;render();});
-const COLL={kirim:"moves",opname:"moves",apopen:"apopen",supplier:"suppliers",appay:"appay",cret:"returns",sret:"supreturns",pricing:"products",matcost:"materials",order:"orders",buy:"purchases",product:"products",material:"materials",buka:"production",packing:"production",prod:"production",cash:"cash",cost:"cash",asset:"cash",move:"moves",account:"accounts",transfer:"transfers",receipt:"receipts",recurring:"recurring"};
+const COLL={emploan:"emploans",emppay:"emploans",kirim:"moves",opname:"moves",apopen:"apopen",supplier:"suppliers",appay:"appay",cret:"returns",sret:"supreturns",pricing:"products",matcost:"materials",order:"orders",buy:"purchases",product:"products",material:"materials",buka:"production",packing:"production",prod:"production",cash:"cash",cost:"cash",asset:"cash",move:"moves",account:"accounts",transfer:"transfers",receipt:"receipts",recurring:"recurring"};
 let cur=null;
 const prodOptions=(sel,only)=>`<option value="">Pilih produk…</option>`+sortBy("products").filter(p=>(p.active!==false||p.id===sel)&&(!only||only(p))).map(p=>`<option value="${p.id}" ${p.id===sel?"selected":""}>${esc(p.name)}</option>`).join("");
 const matOptions=sel=>`<option value="">Pilih bahan…</option>`+sortBy("materials").filter(m=>m.role!=="piece"||m.id===sel).map(m=>`<option value="${m.id}" ${m.id===sel?"selected":""}>${esc(m.name)} (${esc(m.unit||"pcs")})</option>`).join("");
@@ -2317,6 +2346,7 @@ function openForm(kind,id,preset){
   if(id&&!rec){toast("Data ini sudah dihapus");return;}
   if(kind==="prod")kind=rec.type==="buka"?"buka":"packing";
   if(kind==="move"&&rec?.type==="kirim")kind="kirim";
+  if(kind==="emploan"&&rec?.type==="bayar")kind="emppay";
   if(kind==="cash"&&rec&&rec.type==="keluar")kind=rec.category===ASSET?"asset":NON_PL.includes(rec.category)?"cash":"cost";
   if(kind==="cost"&&rec?.category===ASSET)kind="asset";
   cur={kind,id,confirmDel:false,recurringId:rec?.recurringId||preset?.recurringId||null};
@@ -2418,6 +2448,16 @@ function openForm(kind,id,preset){
       ${F("Jumlah (Rp)",money("amount",r.amount??preset?.amount??"",1))}${F("Dibayar dari",`<select name="account">${accOptions(r.account||defAcc("bank"))}</select>`)}</div>
       ${F("Catatan",inp("note",r.note,"text",'placeholder="mis. transfer BCA, cicilan ke-2"'),1)}
       <p class="hint">Boleh bayar sebagian (cicilan). Pilih "faktur terlama" untuk membayar beberapa faktur sekaligus, dialokasikan dari faktur yang paling lama.</p>`;
+  }else if(kind==="emploan"||kind==="emppay"){
+    const E=empState(),names=Object.values(E).map(e=>e.name).sort((a,b)=>a.localeCompare(b)),pay=kind==="emppay";
+    f=`<h2>${pay?(id?"Ubah pembayaran kasbon":"Pembayaran kasbon"):(id?"Ubah kasbon":"Kasbon / pinjaman karyawan")}</h2><div class="fgrid">
+      ${F("Tanggal",inp("date",r.date||defDate(),"date","required"))}
+      ${F("Nama karyawan",inp("emp",r.emp,"text",'required list="emplist" autocomplete="off" placeholder="mis. Rina"'))}<datalist id="emplist">${names.map(n=>`<option value="${esc(n)}">${pay&&E[skey(n)]?.left>=0.5?`sisa ${rp(E[skey(n)].left)}`:""}</option>`).join("")}</datalist>
+      ${F("Jumlah (Rp)",money("amount",r.amount,1))}
+      ${pay?F("Cara bayar",`<select name="method">${opt([["gaji","Potong gaji"],["tunai","Tunai / transfer"]],r.method||"gaji")}</select>`):F("Cicilan per bulan (opsional)",money("plan",r.plan))}
+      ${F(pay?"Rekening (masuk ke / dipakai bayar gaji)":"Dibayar dari",`<select name="account">${accOptions(r.account||defAcc("kas"))}</select>`)}</div>
+      ${F("Catatan",inp("note",r.note,"text",`placeholder="${pay?"mis. potong gaji Oktober":"mis. kasbon untuk biaya sekolah"}"`),1)}
+      <p class="hint">${pay?"Potong gaji: pilih rekening yang dipakai membayar gaji, dan catat gajinya di tab Beban sebesar gaji penuh. Tunai/transfer: pilih rekening tempat uang diterima.":"Uang kasbon keluar dari rekening yang dipilih dan tercatat sebagai piutang karyawan, bukan beban."}</p>`;
   }else if(kind==="cret"){
     f=`<h2>${id?"Ubah retur pembeli":"Retur dari pembeli"}</h2>
       <p class="hint" style="margin:0">Catat saat paket <b>benar-benar tiba kembali</b> di gudang: retur pembeli, atau pesanan yang batal setelah diambil ekspedisi (gagal kirim). Pesanan yang <b>dibatalkan sebelum diambil ekspedisi</b> tidak perlu dicatat, karena stoknya memang tidak pernah dikurangi.</p>
@@ -2588,6 +2628,9 @@ dform.addEventListener("submit",async e=>{
   }else if(k==="cash"||k==="cost"||k==="asset"){data={date:g("date"),type:g("type"),category:g("category"),amount:+g("amount")||0,account:g("account"),note:g("note")};if(cur.recurringId)data.recurringId=cur.recurringId;if(k==="asset")data.life=+g("life")||48;
   }else if(k==="apopen"){data={supplier:supName(g("supplier")),date:g("date"),amount:+g("amount")||0,due:g("due")||g("date"),ref:g("ref"),note:g("note")};
   }else if(k==="supplier"){if(S.suppliers.some(x=>skey(x.name)===skey(g("name"))&&x.id!==cur.id)){toast("Supplier dengan nama ini sudah ada");return;}data={name:g("name"),term:+g("term")||0,note:g("note")};
+  }else if(k==="emploan"||k==="emppay"){const emp=g("emp").replace(/\s+/g," ");if(!emp){toast("Isi nama karyawan");return;}if(!(+g("amount")>0)){toast("Isi jumlah");return;}
+    const ex=S.emploans.find(x=>skey(x.emp)===skey(emp)),nm=ex?ex.emp:emp;
+    data=k==="emppay"?{type:"bayar",date:g("date"),emp:nm,amount:+g("amount")||0,method:g("method"),account:g("account"),note:g("note")}:{type:"pinjam",date:g("date"),emp:nm,amount:+g("amount")||0,plan:+g("plan")||0,account:g("account"),note:g("note")};
   }else if(k==="appay"){if(!g("supplier")){toast("Pilih supplier");return;}data={date:g("date"),supplier:g("supplier"),purchaseId:g("purchaseId"),amount:+g("amount")||0,account:g("account"),note:g("note")};
   }else if(k==="cret"){const p=byId("products",g("productId"));data={date:g("date"),channel:g("channel"),ref:g("ref"),productId:g("productId"),qty:+g("qty")||0,cond:g("cond"),as:p?.stocked&&g("cond")==="baik"?g("as"):"piece",note:g("note")};
   }else if(k==="sret"){const its=items();if(!its.length){toast("Pilih minimal satu barang");return;}const st=g("settle");
