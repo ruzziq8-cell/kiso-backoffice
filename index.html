@@ -1601,6 +1601,10 @@ function parseShopeeExtra(kind,wb,name){
     return ret("Trafik kartu produk Shopee",rows);}
 }
 /* any other marketplace file: keep its first table as-is so it can be read in Analitik (never used in calculations) */
+/* orders dated before the first day the app has orders for are left out: they belong to the opening balances (receivables, stock) */
+function trimOld(x){if(x.kind!=="orders"||x.trimmed)return;x.trimmed=true;const st=S.orderdays.map(d=>d.date).filter(Boolean).sort()[0];if(!st)return;
+  let n=0;for(const d of Object.keys(x.days))if(d<st){n+=x.days[d].length;delete x.days[d];if(x.cust)delete x.cust[d];}
+  if(!n)return;x.old=n;x.oldBefore=st;x.n-=n;const ds=Object.keys(x.days).sort();x.from=ds[0]||x.from;x.cnt={};for(const l of Object.values(x.days))for(const e of l)x.cnt[e.s]=(x.cnt[e.s]||0)+1;}
 function parseGeneric(wb,name,ch){
   const per=periodFromName(name)||[today(),today()],sheets=[];
   for(const sn of wb.SheetNames.slice(0,4)){const rows=sheetRows(wb.Sheets[sn]).map(r=>r.map(clean)).filter(r=>r.some(c=>c));if(!rows.length)continue;
@@ -1743,7 +1747,7 @@ async function analyze(file){
     if(hdr.has("ID postingan"))return parseAds(hdr.has("Nama produk")?"creativeprod":"creative",t("ID postingan"),file.name);
     if(hdr.has("Nama produk")&&hdr.has("Nama kampanye"))return parseAds("product",t("Nama produk"),file.name);
     if(hdr.has("Nama produk")&&hdr.has("ID produk"))return{kind:"skip",name:file.name,label:"Data produk satu kampanye",why:"Sudah tercakup di file Product data (semua kampanye)."};
-    return parseGeneric(wb,file.name,/shopee|product_diagnostics|productoverview/i.test(file.name)?SP:TT);
+    return parseGeneric(wb,file.name,/shopee|product_diagnostics|productoverview|ValidationBill|ProductPerformance|Open_Campaign|Meta_Ads|kisoskin/i.test(file.name)?SP:TT);
   }catch(e){return{kind:"skip",name:file.name,label:"Gagal dibaca",why:String(e.message||e)};}
 }
 
@@ -1753,13 +1757,14 @@ let IMP=[];
 function openImport(){IMP=[];impbox.innerHTML=impHtml();impdlg.showModal();}
 function impHtml(busy){
   const hasInc=IMP.some(x=>x.kind==="income"&&x.withdrawals.length);
+  for(const x of IMP)trimOld(x);
   const knownRefs=new Set([...ORD().filter(o=>o.imported).map(o=>o.ref),...IMP.filter(x=>x.kind==="orders").flatMap(x=>Object.values(x.days).flat().map(e=>e.i))]);
   const card=x=>{
     let d="";
     if(x.kind==="orders"){
       const ex=new Map();for(const doc of S.orderdays)for(const e of doc.orders||[])ex.set(e.i,e);
       let nw=0,up=0;for(const list of Object.values(x.days))for(const e of list){const o=ex.get(e.i);if(!o)nw++;else if(o.s!==e.s||!!o.k!==!!e.k||JSON.stringify(o.it.map(a=>a.slice(0,3)))!==JSON.stringify(e.it.map(a=>a.slice(0,3))))up++;}
-      d=`<div>${fdate(x.from)} – ${fdate(x.to)} · <b>${num(x.n)}</b> pesanan: ${num(nw)} baru, ${num(up)} berubah status, ${num(x.n-nw-up)} sudah ada.</div>
+      d=`<div>${fdate(x.from)} – ${fdate(x.to)} · <b>${num(x.n)}</b> pesanan: ${num(nw)} baru, ${num(up)} berubah status, ${num(x.n-nw-up)} sudah ada.</div>${x.old?`<div class="hint">${num(x.old)} pesanan sebelum ${fdate(x.oldBefore)} tidak diambil (sebelum aplikasi dipakai; sudah termasuk saldo awal piutang dan stok).</div>`:""}
       <div class="hint">${Object.entries(x.cnt).map(([k,v])=>`${(ORDER_ST[k]||[k])[0]} ${num(v)}`).join(" · ")}. Batal dan belum dibayar tidak dihitung ke omzet. ${manualStock({date:x.from})?"Pesanan hanya mencatat penjualan; stok berkurang dari Barang keluar yang dicatat gudang.":"Batal setelah dikirim tetap mengurangi stok sampai paketnya dicatat kembali lewat Retur dari pembeli."}</div>
       ${x.ch===SP&&!manualStock({date:x.from})?`<div class="hint"><b>${num(x.kilat||0)}</b> pesanan kilat (pengiriman diatur ≤25 menit setelah bayar, dikirim agen SPX): dicatat sebagai penjualan, <b>${S.settings.kilatOn?"tidak mengurangi stok gudang"+(S.settings.kilatFrom?" (pesanan mulai "+fdate(S.settings.kilatFrom)+")":""):"masih mengurangi stok karena aturan kilat di Pengaturan nonaktif"}</b>.</div>`:""}
       <div class="hint">Pencocokan SKU: ${Object.entries(x.skuMap).map(([k,v])=>`${esc(k.split(" · ")[0])} → ${esc(v)}`).join(", ")}</div>
@@ -1814,7 +1819,7 @@ async function saveImport(withdrawAcc,progress){
   if(IMP.some(x=>x.rkind==="shopeemeta"||x.rkind==="shopeebal")&&!byId("accounts",ADS_META_ACC))jobs.push(["Membuat rekening Saldo Iklan Meta (Shopee)",()=>db.collection("accounts").doc(ADS_META_ACC).set({name:"Saldo Iklan Meta (Shopee)",type:"marketplace",opening:0,sort:7,created:Date.now()})]);
   for(const ch of [TT,SP])if(IMP.some(x=>x.kind==="income"&&x.ch===ch)&&!byId("accounts",CHX[ch].acc))jobs.push([`Membuat rekening ${CHX[ch].accName}`,()=>db.collection("accounts").doc(CHX[ch].acc).set({name:CHX[ch].accName,type:"marketplace",opening:0,sort:ch===TT?3:5,created:Date.now()})]);
   const custJobs=new Map();
-  for(const x of IMP){
+  for(const x of IMP){trimOld(x);
     if(x.kind==="orders")for(const [date,list] of Object.entries(x.days)){
       const id=`${CHX[x.ch].pre}-${date}`,prev=byId("orderdays",id),map=new Map((prev?.orders||[]).map(e=>[e.i,e]));
       /* an older export must not move an order back (Selesai → Dikirim): keep the further status */
