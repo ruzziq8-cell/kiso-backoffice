@@ -1596,7 +1596,7 @@ function parseTTProd(first,name){
   const per=dm?[`${dm[3]}-${dm[2]}-${dm[1]}`,`${dm[6]}-${dm[5]}-${dm[4]}`]:[today(),today()];
   return{kind:"report",ch:TT,rkind:"ttprod",name,label:"Daftar produk TikTok (trafik & sumber GMV per produk)",rows,from:per[0],to:per[1]};
 }
-function ttLatest(kind,start,end){return S.adsreports.filter(r=>r.kind===kind&&(r.ch||TT)===TT&&r.from<=end&&r.to>=start).sort((a,b)=>b.to.localeCompare(a.to)||mdays(b.from,b.to)-mdays(a.from,a.to))[0];}
+function ttLatest(kind,start,end){const ov=r=>mdays(r.from>start?r.from:start,r.to<end?r.to:end);return S.adsreports.filter(r=>r.kind===kind&&(r.ch||TT)===TT&&r.from<=end&&r.to>=start).sort((a,b)=>ov(b)-ov(a)||b.to.localeCompare(a.to))[0];}
 function ttShopPanel(start,end){const r=ttLatest("ttshop",start,end),p=ttLatest("ttprod",start,end);if(!r&&!p)return"";
   const P=v=>v==null?"–":v.toFixed(2).replace(".",",")+"%",N=v=>v==null?"–":num(v),G=v=>v==null?"–":rp0(v);
   let h=`<div class="panel"><div class="row"><h3>Trafik & sumber GMV toko TikTok</h3><div class="sp"></div><span class="hint">Analisis Data Toko ${fdate((r||p).from)} – ${fdate((r||p).to)}${r?.summary?.cmp?` · dibanding ${esc(r.summary.cmp)}`:""}</span></div>`;
@@ -1673,6 +1673,15 @@ function parseShopeeExtra(kind,wb,name){
 }
 /* any other marketplace file: keep its first table as-is so it can be read in Analitik (never used in calculations) */
 /* orders dated before the first day the app has orders for are left out: they belong to the opening balances (receivables, stock) */
+/* per-campaign "Product data" files: skipped when the all-campaign file for the same period is in the batch, otherwise merged into one product report */
+function mergeProdCamp(IMP){const pc=IMP.filter(x=>x.rkind==="productcamp"&&!x.merged);if(!pc.length)return;
+  const names=new Map();for(const r of [...S.adsreports.filter(r=>r.kind==="prodcampaign"),...IMP.filter(x=>x.rkind==="prodcampaign")])for(const y of r.rows||[])if(y.id)names.set(String(y.id),y.camp);
+  const per=new Map();for(const x of pc){const k=x.from+"|"+x.to;(per.get(k)||per.set(k,[]).get(k)).push(x);}
+  for(const [k,list] of per){const [from,to]=k.split("|");
+    if(IMP.some(x=>x.rkind==="product"&&x.from===from&&x.to===to)){for(const x of list)Object.assign(x,{kind:"skip",merged:true,why:"Sudah tercakup di file Product data (semua kampanye)."});continue;}
+    const host=list[0],rows=list.flatMap(x=>x.rows.filter(r=>r.spend||r.gmv||r.orders).map(r=>({camp:names.get(x.camp)||("Kampanye "+x.camp),...r})));
+    Object.assign(host,{rkind:"product",merged:true,label:`Data produk per kampanye (gabungan ${list.length} file per kampanye)`,rows});
+    for(const x of list.slice(1))Object.assign(x,{kind:"skip",merged:true,label:"Data produk satu kampanye",why:`Digabung ke data produk per kampanye ${fdate(from)} – ${fdate(to)}.`});}}
 function trimOld(x){if(x.kind!=="orders"||x.trimmed)return;x.trimmed=true;const st=S.orderdays.map(d=>d.date).filter(Boolean).sort()[0];if(!st)return;
   let n=0;for(const d of Object.keys(x.days))if(d<st){n+=x.days[d].length;delete x.days[d];if(x.cust)delete x.cust[d];}
   if(!n)return;x.old=n;x.oldBefore=st;x.n-=n;const ds=Object.keys(x.days).sort();x.from=ds[0]||x.from;x.cnt={};for(const l of Object.values(x.days))for(const e of l)x.cnt[e.s]=(x.cnt[e.s]||0)+1;}
@@ -1762,7 +1771,7 @@ function parseAds(kind,rows,name){
   if(kind==="livedaily")out=rows.map(r=>({date:ymd(r["Waktu"]),gmv:nv(gp(r,"GMV dari LIVE")),sessions:nv(r["Siaran LIVE"]),withGmv:nv(gp(r,"Jumlah Siaran LIVE yang")),orders:nv(r["Pesanan SKU teratribusi"]),views:nv(r["Tayangan LIVE"]),watch:nv(gp(r,"Durasi menonton"))})).filter(x=>x.date);
   if((kind==="cardtraffic"||kind==="livedaily")&&out.length){per[0]=out[0].date;per[1]=out[out.length-1].date;}
   if(kind==="product")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({camp:r["Nama kampanye"],prod:r["Nama produk"].slice(0,80),spend:nv(r["Biaya"]),orders:nv(r["Pesanan SKU"]),gmv:nv(r["Pendapatan kotor"])}));
-  if(kind==="prodcampaign")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({camp:r["Nama kampanye"],budget:nv(r["Anggaran saat ini"]),spend:nv(r["Biaya"]),gmv:nv(g1(r,"Pendapatan kotor","Penghasilan bruto")),orders:nv(r["Pesanan SKU"]),roi:nv(r["ROI"])}));
+  if(kind==="prodcampaign")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({id:clean(r["ID Campaign"]),camp:r["Nama kampanye"],budget:nv(r["Anggaran saat ini"]),spend:nv(r["Biaya"]),gmv:nv(g1(r,"Pendapatan kotor","Penghasilan bruto")),orders:nv(r["Pesanan SKU"]),roi:nv(r["ROI"])}));
   if(kind==="livecampaign")out=rows.filter(r=>r["Nama kampanye"]).map(r=>({camp:r["Nama kampanye"],budget:nv(r["Anggaran saat ini"]),spend:nv(r["Biaya"]),gmv:nv(g1(r,"Pendapatan kotor","Penghasilan bruto")),orders:nv(r["Pesanan SKU"]),views:nv(r["Tayangan LIVE"])}));
   /* daily-per-campaign layout: add the days up per campaign so the report looks like the usual one */
   if((kind==="prodcampaign"||kind==="livecampaign")&&rows.some(r=>r["Per Hari"])){const by=new Map();
@@ -1819,7 +1828,8 @@ async function analyze(file){
     if(hdr.has("Anggaran saat ini"))return parseAds(hdr.has("Tayangan LIVE")?"livecampaign":"prodcampaign",t("ID Campaign"),file.name);
     if(hdr.has("ID postingan"))return parseAds(hdr.has("Nama produk")?"creativeprod":"creative",t("ID postingan"),file.name);
     if(hdr.has("Nama produk")&&hdr.has("Nama kampanye"))return parseAds("product",t("Nama produk"),file.name);
-    if(hdr.has("Nama produk")&&hdr.has("ID produk"))return{kind:"skip",name:file.name,label:"Data produk satu kampanye",why:"Sudah tercakup di file Product data (semua kampanye)."};
+    if(hdr.has("Nama produk")&&hdr.has("ID produk")){const per=periodFromName(file.name)||[M()+"-01",endOf(M())];
+      return{kind:"report",ch:TT,rkind:"productcamp",camp:(/Campaign_(\d+)/.exec(file.name)||[])[1]||"",name:file.name,label:"Data produk satu kampanye",rows:(t("Nama produk")||[]).map(r=>({prod:clean(r["Nama produk"]).slice(0,80),spend:nv(r["Biaya"]),orders:nv(r["Pesanan SKU"]),gmv:nv(r["Pendapatan kotor"])})),from:per[0],to:per[1]};}
     return parseGeneric(wb,file.name,/shopee|product_diagnostics|productoverview|ValidationBill|ProductPerformance|Open_Campaign|Meta_Ads|kisoskin/i.test(file.name)?SP:TT);
   }catch(e){return{kind:"skip",name:file.name,label:"Gagal dibaca",why:String(e.message||e)};}
 }
@@ -1830,7 +1840,7 @@ let IMP=[];
 function openImport(){IMP=[];impbox.innerHTML=impHtml();impdlg.showModal();}
 function impHtml(busy){
   const hasInc=IMP.some(x=>x.kind==="income"&&x.withdrawals.length);
-  for(const x of IMP)trimOld(x);
+  mergeProdCamp(IMP);for(const x of IMP)trimOld(x);
   const knownRefs=new Set([...ORD().filter(o=>o.imported).map(o=>o.ref),...IMP.filter(x=>x.kind==="orders").flatMap(x=>Object.values(x.days).flat().map(e=>e.i))]);
   const card=x=>{
     let d="";
@@ -1893,8 +1903,8 @@ async function saveImport(withdrawAcc,progress){
   if(IMP.some(x=>x.rkind==="shopeeads"||x.rkind==="shopeebill"||(x.kind==="income"&&x.ch===SP))&&!byId("accounts",ADS_SP_ACC))jobs.push(["Membuat rekening Saldo Iklan Shopee",()=>db.collection("accounts").doc(ADS_SP_ACC).set({name:"Saldo Iklan Shopee",type:"marketplace",opening:0,sort:6,created:Date.now()})]);
   if(IMP.some(x=>x.rkind==="shopeemeta"||x.rkind==="shopeebal")&&!byId("accounts",ADS_META_ACC))jobs.push(["Membuat rekening Saldo Iklan Meta (Shopee)",()=>db.collection("accounts").doc(ADS_META_ACC).set({name:"Saldo Iklan Meta (Shopee)",type:"marketplace",opening:0,sort:7,created:Date.now()})]);
   for(const ch of [TT,SP])if(IMP.some(x=>x.kind==="income"&&x.ch===ch)&&!byId("accounts",CHX[ch].acc))jobs.push([`Membuat rekening ${CHX[ch].accName}`,()=>db.collection("accounts").doc(CHX[ch].acc).set({name:CHX[ch].accName,type:"marketplace",opening:0,sort:ch===TT?3:5,created:Date.now()})]);
-  const custJobs=new Map();
-  for(const x of IMP){trimOld(x);
+  mergeProdCamp(IMP);const custJobs=new Map();
+  for(const x of IMP){if(x.kind==="skip")continue;trimOld(x);
     if(x.kind==="orders")for(const [date,list] of Object.entries(x.days)){
       const id=`${CHX[x.ch].pre}-${date}`,prev=byId("orderdays",id),map=new Map((prev?.orders||[]).map(e=>[e.i,e]));
       /* an older export must not move an order back (Selesai → Dikirim): keep the further status */
