@@ -214,7 +214,9 @@ const counts=o=>o.status!=="batal"&&o.status!=="pending"&&!isSample(o);
 const BUY_ST={dipesan:["Dipesan","warn"],diterima:["Diterima","good"],batal:["Batal","bad"]};
 const ASSET="Aset tetap";
 const OUT_CAT=["Gaji","Listrik","Internet / WiFi","Sewa","Air","Transport & bensin","ATK & perlengkapan","Konsumsi","Ongkir di luar marketplace","Iklan Shopee","Iklan TikTok","Affiliate","Biaya bank & admin","Lain-lain",ASSET,"Prive / ambil pemilik"];
-const IN_CAT=["Pendapatan lain","Bunga bank","Modal masuk"];
+const IN_CAT=["Pendapatan lain","Bunga bank","Modal masuk","Pengembalian iklan TikTok","Pengembalian iklan Shopee"];
+/* ad refunds/credits (e.g. TikTok ROI protection) lower that channel's ad cost instead of counting as other income */
+const ADS_REFUND={"Pengembalian iklan TikTok":"Iklan TikTok","Pengembalian iklan Shopee":"Iklan Shopee"};
 const NON_PL=["Modal masuk","Prive / ambil pemilik"];
 const EXCL=[...NON_PL,ASSET];
 const ADS=["Iklan Shopee","Iklan TikTok"];
@@ -497,7 +499,7 @@ function monthPL(m=M(),ch=null){
   const adj=S.receipts.filter(x=>x.type==="penyesuaian"&&x.period===m&&(!ch||x.channel===ch)).reduce((a,x)=>a+(+x.amount||0),0);
   const outBy={};let otherIn=0;
   const incomeBy={},addInc=(k,v)=>{if(v)incomeBy[k]=(incomeBy[k]||0)+v;};
-  if(!ch)for(const c of S.cash.filter(im)){if(EXCL.includes(c.category))continue;if(c.type==="keluar")outBy[c.category]=(outBy[c.category]||0)+(+c.amount||0);else addInc(c.category,+c.amount||0);}
+  if(!ch)for(const c of S.cash.filter(im)){if(EXCL.includes(c.category))continue;if(c.type==="keluar")outBy[c.category]=(outBy[c.category]||0)+(+c.amount||0);else if(ADS_REFUND[c.category])outBy[ADS_REFUND[c.category]]=(outBy[ADS_REFUND[c.category]]||0)-(+c.amount||0);else addInc(c.category,+c.amount||0);}
   for(const a of derive().adj)if((a.date||"").slice(0,7)===m&&(!ch||a.ch===ch)){const v=+a.amt||0;if(/iklan/i.test(a.type))continue;if(v>0)addInc(`${a.type} (${a.ch})`,v);else outBy["Penyesuaian marketplace"]=(outBy["Penyesuaian marketplace"]||0)-v;}
   if(!ch){let sh=0;for(const o of ORD())if(im(o)&&isSample(o)&&o.status!=="batal"&&o.status!=="pending")sh+=orderTotals(o).hpp;if(sh)outBy["Sampel & promosi (HPP produk)"]=(outBy["Sampel & promosi (HPP produk)"]||0)+sh;}
   const adsUse=!ch||ch===TT?S.adsdaily.filter(im).reduce((a,d)=>a+(+d.spend||0),0):0;if(adsUse)outBy["Iklan TikTok"]=(outBy["Iklan TikTok"]||0)+adsUse;
@@ -1986,6 +1988,7 @@ function dailyStats(m=M(),ch="Semua"){
     for(let dt=r.from;dt<=r.to;dt=addDays(dt,1))if(dt>=start&&dt<=end){const x=at(dt);for(const [k,v] of Object.entries(tot))x[k]+=(+v||0)/r.len;x.spAds+=r.spend/r.len;x.adsData=true;}
   }
   for(const c of S.cash)if((c.date||"").slice(0,7)===m&&c.type==="keluar"&&((c.category==="Iklan TikTok"&&want(TT))||(c.category==="Iklan Shopee"&&want(SP))))at(c.date).ads+=+c.amount||0;
+  for(const c of S.cash)if((c.date||"").slice(0,7)===m&&c.type==="masuk"&&((ADS_REFUND[c.category]==="Iklan TikTok"&&want(TT))||(ADS_REFUND[c.category]==="Iklan Shopee"&&want(SP))))at(c.date).ads-=+c.amount||0;
   let prev=null;
   for(const x of D){
     x.cm=x.gross-x.fee-x.refund-x.hpp;x.profit=x.cm-x.ads;
