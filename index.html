@@ -1784,7 +1784,7 @@ function parseAds(kind,rows,name){
     const all=rows.filter(r=>r["ID postingan"]||r["Materi Iklan"]);const st={};
     for(const r of all){const k=r["Status sekunder penjelajahan"]||"–";st[k]=(st[k]||0)+1;}
     summary={total:all.length,withSpend:all.filter(r=>nv(r["Biaya"])>0).length,status:st};
-    out=all.map(r=>({id:r["ID postingan"],title:(r["Materi Iklan"]||"").slice(0,70),acct:r["Akun TikTok"],type:r["Jenis materi iklan"],spend:nv(r["Biaya"]),orders:nv(r["Pesanan SKU"]),gmv:nv(g1(r,"Pendapatan kotor","Penghasilan bruto")),impr:nv(g1(r,"Impresi iklan produk","Impresi iklan LIVE")),clicks:nv(g1(r,"Jumlah klik iklan produk","Jumlah klik iklan LIVE")),status:r["Status sekunder penjelajahan"],camp:r["Nama kampanye"]})).filter(x=>x.spend>0||x.gmv>0).sort((a,b)=>b.spend-a.spend).slice(0,200);}
+    out=all.map(r=>({id:r["ID postingan"],title:[...(r["Materi Iklan"]||"")].slice(0,70).join(""),acct:r["Akun TikTok"],type:r["Jenis materi iklan"],spend:nv(r["Biaya"]),orders:nv(r["Pesanan SKU"]),gmv:nv(g1(r,"Pendapatan kotor","Penghasilan bruto")),impr:nv(g1(r,"Impresi iklan produk","Impresi iklan LIVE")),clicks:nv(g1(r,"Jumlah klik iklan produk","Jumlah klik iklan LIVE")),status:r["Status sekunder penjelajahan"],camp:r["Nama kampanye"]})).filter(x=>x.spend>0||x.gmv>0).sort((a,b)=>b.spend-a.spend).slice(0,200);}
   const L={cardtraffic:"Trafik kartu produk",livedaily:"Performa LIVE harian",product:"Data produk per kampanye",livecampaign:"Kampanye LIVE",prodcampaign:"Kampanye produk (GMV Max)",live:"Sesi LIVE",creative:"Materi iklan LIVE",creativeprod:"Materi iklan produk"};
   return{kind:"report",ch:TT,rkind:kind,name,label:L[kind],rows:out,summary,from:per[0],to:per[1]};
 }
@@ -2698,7 +2698,7 @@ function makeDb(sb){
     if(p.eventType==="DELETE"){st[r.coll].rows.delete(r.id);emit(r.coll);}else refresh(r.coll,r.id).catch(()=>{});
   }).subscribe();
   const ref=(c,id)=>({
-    async set(d){const body=JSON.parse(JSON.stringify(d));const{error}=await sb.from("docs").upsert({coll:c,id,data:body,updated_at:new Date().toISOString()});if(error)throw error;if(st[c]){st[c].rows.set(id,body);emit(c);}},
+    async set(d){const body=JSON.parse(JSON.stringify(d,(k,v)=>typeof v==="string"?v.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,""):v));const{error}=await sb.from("docs").upsert({coll:c,id,data:body,updated_at:new Date().toISOString()});if(error)throw error;if(st[c]){st[c].rows.set(id,body);emit(c);}},
     async delete(){const{data,error}=await sb.from("docs").delete().eq("coll",c).eq("id",id).select("id");if(error)throw error;if(!data.length&&st[c]?.rows.has(id))throw{code:"42501"};if(st[c]){st[c].rows.delete(id);emit(c);}},
     async get(){const{data,error}=await sb.from("docs").select("data").eq("coll",c).eq("id",id).maybeSingle();if(error)throw error;return{id,exists:!!data,data:()=>data?.data};},
     onSnapshot(f,err){watch(c,()=>{const d=st[c].rows.get(id);f({id,exists:d!==undefined,data:()=>d});},err);},
