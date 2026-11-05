@@ -782,8 +782,11 @@ V.buy=()=>{
   </tbody></table></div><p class="hint">Stok bahan berkurang sesuai jumlah yang diretur. Refund menambah saldo rekening, potong hutang mengurangi hutang supplier di Laporan. Untuk "diganti barang", catat barang pengganti sebagai pembelian baru dengan harga 0 saat diterima.</p></div>`:"";})()}`;
 };
 
+/* show settled invoices too, so an opening balance or old purchase can still be checked and corrected after it is paid off */
+let apAll=(()=>{try{return localStorage.getItem("kiso.apAll")==="1";}catch(e){return false;}})();
 V.ap=()=>{
   const AP=apState(),T=today(),soon=addDays(T,7),sups=Object.values(AP).sort((a,b)=>b.left-a.left);
+  const allInv=sups.flatMap(s=>s.inv.map(i=>({...i,sup:s.name}))).sort((a,b)=>b.date.localeCompare(a.date));
   const open=sups.flatMap(s=>s.open.map(i=>({...i,sup:s.name}))).sort((a,b)=>a.due.localeCompare(b.due));
   const tot=open.reduce((a,i)=>a+i.left,0),od=open.filter(i=>i.due<T),ds=open.filter(i=>i.due>=T&&i.due<=soon);
   const known=new Map(S.suppliers.map(x=>[skey(x.name),x]));for(const s of sups)if(!known.has(skey(s.name)))known.set(skey(s.name),{name:s.name});
@@ -799,9 +802,9 @@ V.ap=()=>{
     <div class="tbl"><table><thead><tr><th>Supplier</th><th class="n">Tempo</th><th class="n">Faktur terbuka</th><th>Jatuh tempo terdekat</th><th class="n">Sisa hutang</th><th></th></tr></thead><tbody>
     ${[...known.values()].map(x=>{const s=AP[skey(x.name)],o=s?.open||[],nd=o.map(i=>i.due).sort()[0];return`<tr><td class="click" ${x.id?`data-edit="supplier" data-id="${x.id}"`:""} style="cursor:${x.id?"pointer":"default"}"><b>${esc(x.name)}</b>${x.note?`<div class="hint">${esc(x.note)}</div>`:""}</td><td class="n">${x.term?num(x.term)+" hari":"–"}</td><td class="n">${num(o.length)}</td><td>${nd?`<span class="pill ${nd<T?"bad":nd<=soon?"warn":""}">${fdate(nd)}</span>`:"–"}</td><td class="n"><b>${rp(s?.left||0)}</b>${s?.extra>=0.5?`<div class="hint">kelebihan bayar ${rp(s.extra)}</div>`:""}</td><td class="n">${S.canWrite&&s?.left>=0.5?`<button class="btn sm pri" data-paysup="${esc(x.name)}">Bayar</button>`:""}</td></tr>`;}).join("")||`<tr><td colspan="6" class="mut">Belum ada supplier.</td></tr>`}
     </tbody></table></div></div>
-  <div class="panel"><h3>Faktur belum lunas</h3>
-    ${open.length?`<div class="tbl"><table><thead><tr><th>Tgl faktur</th><th>Supplier</th><th>Barang</th><th class="n">Nilai</th><th class="n">Sudah dibayar</th><th class="n">Sisa</th><th>Jatuh tempo</th><th></th></tr></thead><tbody>
-    ${open.map(i=>`<tr><td>${fdate(i.date)}</td><td>${esc(i.sup)}</td><td class="wrapcell">${i.opening?`<span class="pill acc">Saldo awal</span> ${esc(i.ref||i.note||"")}`:(i.b.items||[]).map(it=>`${esc(matName(it.materialId))} ×${num(+it.qty)}`).join(", ")}</td><td class="n">${rp(i.total)}</td><td class="n mut">${rp(i.paid)}</td><td class="n"><b>${rp(i.left)}</b></td><td><span class="pill ${i.due<T?"bad":i.due<=soon?"warn":""}">${fdate(i.due)}${i.due<T?` · lewat ${num(Math.round((new Date(T)-new Date(i.due))/864e5))} hari`:""}</span></td><td class="n">${S.canWrite?`${i.opening?`<button class="btn sm" data-edit="apopen" data-id="${i.id}">Ubah</button> `:""}<button class="btn sm" data-payinv="${i.id}">Bayar</button>`:""}</td></tr>`).join("")}
+  <div class="panel"><div class="row"><h3>${apAll?"Semua faktur (termasuk yang lunas)":"Faktur belum lunas"}</h3><div class="sp"></div><button class="btn sm" data-apall>${apAll?"Sembunyikan yang lunas":`Tampilkan yang sudah lunas (${num(allInv.length-open.length)})`}</button></div>
+    ${(apAll?allInv:open).length?`<div class="tbl"><table><thead><tr><th>Tgl faktur</th><th>Supplier</th><th>Barang</th><th class="n">Nilai</th><th class="n">Sudah dibayar</th><th class="n">Sisa</th><th>Jatuh tempo</th><th></th></tr></thead><tbody>
+    ${(apAll?allInv:open).map(i=>{const done=i.left<0.5;return`<tr><td>${fdate(i.date)}</td><td>${esc(i.sup)}</td><td class="wrapcell">${i.opening?`<span class="pill acc">Saldo awal</span> ${esc(i.ref||i.note||"")}`:(i.b.items||[]).map(it=>`${esc(matName(it.materialId))} ×${num(+it.qty)}`).join(", ")}</td><td class="n">${rp(i.total)}</td><td class="n mut">${rp(i.paid)}</td><td class="n"><b>${rp(i.left)}</b></td><td>${done?'<span class="pill good">Lunas</span>':`<span class="pill ${i.due<T?"bad":i.due<=soon?"warn":""}">${fdate(i.due)}${i.due<T?` · lewat ${num(Math.round((new Date(T)-new Date(i.due))/864e5))} hari`:""}</span>`}</td><td class="n">${S.canWrite?`${i.opening?`<button class="btn sm" data-edit="apopen" data-id="${i.id}">Ubah</button> `:`<button class="btn sm" data-edit="buy" data-id="${i.id}">Ubah</button> `}${done?"":`<button class="btn sm" data-payinv="${i.id}">Bayar</button>`}`:""}</td></tr>`;}).join("")}
     </tbody></table></div>`:`<div class="empty"><b>Tidak ada hutang</b>Pembelian dengan pembayaran "Tempo" yang sudah diterima akan muncul di sini.</div>`}
     <p class="hint">Hutang tercatat saat barang pembelian tempo berstatus <b>Diterima</b>. Bayar per faktur, atau bayar per supplier (dialokasikan ke faktur terlama dulu). Retur ke supplier dengan penyelesaian "potong hutang" otomatis mengurangi sisa hutang.</p></div>
   <div class="panel"><h3>Pembayaran hutang · ${esc(mname(M()))}</h3>
@@ -2312,6 +2315,7 @@ app.addEventListener("click",e=>{
   const pi=t.closest("[data-payinv]");if(pi){const b=byId("purchases",pi.dataset.payinv)||byId("apopen",pi.dataset.payinv),iv=apState()[skey(b.supplier)]?.inv.find(i=>i.id===b.id);openForm("appay",null,{supplier:supName(b.supplier),purchaseId:b.id,amount:iv?Math.round(iv.left*100)/100:""});return;}
   const rv=t.closest("[data-recv]");if(rv){const[c,m]=rv.dataset.recv.split("|");openForm("receipt",null,{channel:c,period:m});return;}
   const nw=t.closest("[data-new]");if(nw){openForm(nw.dataset.new);return;}
+  if(t.closest("[data-apall]")){apAll=!apAll;try{localStorage.setItem("kiso.apAll",apAll?"1":"0");}catch(e){}render();return;}
   const ed=t.closest("[data-edit]");if(ed){openForm(ed.dataset.edit,ed.dataset.id);return;}
   if(t.id==="saveSet")saveSettings();
   if(t.closest("[data-import]")){openImport();return;}
