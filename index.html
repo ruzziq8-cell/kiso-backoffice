@@ -901,7 +901,8 @@ function perfData(m,ch){
   const K=D.filter(x=>x.ctr!=null).reduce((a,x)=>{for(const k of ["ads","adsOrders","impr","clicks"])a[k]=(a[k]||0)+x[k];return a;},{});A.ctr=K.impr?K.clicks/K.impr:null;A.cpc=K.clicks?K.ads/K.clicks:null;A.cvr=K.clicks?K.adsOrders/K.clicks:null;
   const pm=pmap();let soap=0,canc=0,all=0;
   for(const o of ORD())if((o.date||"").slice(0,7)===m&&(!C||o.channel===C)&&!isSample(o)){all++;if(o.status==="batal"||o.status==="gagal")canc++;if(counts(o))for(const it of o.items||[])soap+=(+it.qty||0)*(+pm[it.productId]?.pcs||0);}
-  const recur=S.recurring.filter(r=>r.active!==false).reduce((a,r)=>a+(+r.amount||0),0);
+  /* fixed-cost plan for a month still running = last month's actual operating costs (the recurring-expense list was retired) */
+  const recur=C?0:monthPL(perfPrevM(m)).opex;
   const fixedAct=C?0:pl.opex+pl.dep,fixedPlan=C?0:recur+pl.dep;
   const fixed=C?0:(complete?fixedAct:Math.max(fixedAct,fixedPlan));
   const g=pl.gross,adsAll=pl.ads+pl.aff,var_=pl.grossProfit-adsAll,vr=g?var_/g:0;
@@ -1059,7 +1060,7 @@ V.perf=()=>{
         ${kpi("Omzet untuk laba bersih 10%",tgt(0.1)?rp0(tgt(0.1)):"–",tgt(0.1)?`≈ ${rp0(tgt(0.1)/P.nDays)}/hari`:"Margin setelah iklan di bawah 10%")}
         ${kpi("Omzet untuk laba bersih 15%",tgt(0.15)?rp0(tgt(0.15)):"–",tgt(0.15)?`≈ ${rp0(tgt(0.15)/P.nDays)}/hari`:"Margin setelah iklan di bawah 15%")}
       </div>
-      <p class="hint">Beban tetap yang dipakai: ${rp0(P.fixed)} sebulan (${P.complete?"realisasi":`yang lebih besar antara realisasi ${rp0(P.fixedAct)} dan beban rutin + penyusutan ${rp0(P.fixedPlan)}`}). Isi daftar Beban rutin di tab Beban & Aset supaya titik impas akurat.</p>
+      <p class="hint">Beban tetap yang dipakai: ${rp0(P.fixed)} sebulan (${P.complete?"realisasi":`yang lebih besar antara realisasi ${rp0(P.fixedAct)} dan beban bulan lalu + penyusutan ${rp0(P.fixedPlan)}`}).</p>
       <h3 style="margin-top:12px">Simulasi skenario (bulan penuh)</h3>
       <div class="tbl"><table><thead><tr><th>Skenario</th><th class="n">Omzet</th><th class="n">Laba bersih</th><th class="n">Margin</th></tr></thead><tbody>
         ${sc("Seperti sekarang",0)}${sc("Omzet +20% dengan ROAS sama",0.2)}${sc("Omzet +20%, iklan +40% (ROAS turun)",0.2,0.4)}${sc("Iklan −30%, omzet −10%",-0.1,-0.3)}${sc("HPP −10% (negosiasi supplier)",0,0,0.1)}${sc("Omzet −20%",-0.2)}
@@ -1360,30 +1361,15 @@ V.price=()=>{
 };
 
 V.cost=()=>{
-  const rec=sortBy("recurring");
   const mc=S.cash.filter(c=>inMonth(c)&&c.type==="keluar");
-  const done=id=>mc.filter(c=>c.recurringId===id);
-  const recRows=rec.filter(r=>r.active!==false).map(r=>{const d=done(r.id),paid=d.reduce((a,c)=>a+(+c.amount||0),0);
-    return`<tr><td class="click" data-edit="recurring" data-id="${r.id}" style="cursor:pointer"><b>${esc(r.name)}</b><div class="hint">${esc(r.category)} · dari ${esc(aname(r.account))}</div></td><td class="n">${+r.amount?rp(+r.amount):'<span class="pill bad">Isi nominal</span>'}</td>
-    <td>${d.length?`<span class="pill good">Tercatat ${fdate(d[0].date)}</span>`:'<span class="pill warn">Belum</span>'}</td><td class="n">${d.length?rp(paid):"–"}</td>
-    <td class="n">${S.canWrite&&!d.length?`<button class="btn sm pri" data-pay="${r.id}">Catat bayar</button>`:""}</td></tr>`}).join("");
-  const recTot=rec.filter(r=>r.active!==false).reduce((a,r)=>a+(+r.amount||0),0);
-  const recPaid=mc.filter(c=>c.recurringId).reduce((a,c)=>a+(+c.amount||0),0);
   const daily=mc.filter(c=>!EXCL.includes(c.category)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
   const byCat={};daily.forEach(c=>byCat[c.category]=(byCat[c.category]||0)+(+c.amount||0));
   const tot=daily.reduce((a,c)=>a+(+c.amount||0),0);
   const assets=assetsAt(M());
   const at={cost:0,acc:0,book:0,dep:0};assets.forEach(a=>{at.cost+=a.cost;at.acc+=a.acc;at.book+=a.book;at.dep+=a.dep;});
-  return`<div class="row"><h2>Beban & aset ${esc(mname(M()))}</h2><div class="sp"></div>${btn("recurring","+ Beban rutin")}${btn("asset","+ Beli aset")}${btn("cost","+ Catat beban",1)}</div>
-  <div class="grid2">
-   <div class="panel"><div class="row"><h3>Beban rutin bulanan</h3><div class="sp"></div><span class="hint">Tercatat ${rp(recPaid)} dari anggaran ${rp(recTot)}</span></div>
-    ${rec.length?`<div class="tbl"><table><thead><tr><th>Beban</th><th class="n">Anggaran</th><th>Status</th><th class="n">Dibayar</th><th></th></tr></thead><tbody>${recRows}</tbody></table></div>
-    <p class="hint">Klik "Catat bayar" setiap bulan. Nominal bisa diubah saat mencatat. Klik nama beban untuk mengubah anggaran atau rekening sumbernya.</p>`
-    :`<div class="empty"><b>Belum ada beban rutin</b>Tambahkan gaji, listrik, WiFi, sewa, dan beban tetap lain.</div>`}
-   </div>
-   <div class="panel"><h3>Per kategori</h3>
+  return`<div class="row"><h2>Beban & aset ${esc(mname(M()))}</h2><div class="sp"></div>${btn("asset","+ Beli aset")}${btn("cost","+ Catat beban",1)}</div>
+  <div class="panel"><h3>Per kategori</h3>
     ${Object.keys(byCat).length||at.dep?`<div class="pl">${Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div><span>${esc(k)}</span><span>${rp(v)}</span></div>`).join("")}${at.dep?`<div><span>Penyusutan aset tetap</span><span>${rp(at.dep)}</span></div>`:""}<div class="big"><span>Total beban</span><span>${rp(tot+at.dep)}</span></div></div>`:`<div class="empty">Belum ada beban tercatat.</div>`}
-   </div>
   </div>
   <div class="panel"><h3>Semua beban · harian</h3>
    ${daily.length?`<div class="tbl"><table><thead><tr><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th>Dibayar dari</th><th class="n">Jumlah</th></tr></thead><tbody>${daily.map(c=>`<tr class="click" data-edit="cost" data-id="${c.id}"><td>${fdate(c.date)}</td><td>${esc(c.category)}${c.recurringId?' <span class="pill acc">Rutin</span>':""}</td><td class="wrapcell">${esc(c.note||"")}</td><td>${esc(aname(c.account))}</td><td class="n">${rp(+c.amount)}</td></tr>`).join("")}</tbody><tfoot><tr><td colspan="4">Total</td><td class="n">${rp(tot)}</td></tr></tfoot></table></div>`
@@ -1507,7 +1493,7 @@ V.set=()=>{const op=S.settings.arOpening||{};return`${userPanel()}<h2>Pengaturan
     <div class="fgrid"><label class="field"><span>Aturan</span><select id="setKilat"><option value="">Nonaktif — kilat tetap mengurangi stok</option><option value="1"${S.settings.kilatOn?" selected":""}>Aktif — kilat tidak mengurangi stok</option></select></label>
     <label class="field"><span>Berlaku untuk pesanan mulai tanggal (kosong = semua)</span><input id="setKilatFrom" type="date" value="${esc(S.settings.kilatFrom||"")}"></label></div>
     ${S.canWrite?`<div><button class="btn pri" id="saveSet">Simpan</button></div>`:""}
-    <p class="hint">Rekening diatur di tab Bank & Kas. Beban rutin dan aset di tab Beban & Aset. Isi per karton di bahan "Karton sabun" pada tab Stok. Kode SKU marketplace diatur per produk di tab Stok.</p>
+    <p class="hint">Rekening diatur di tab Bank & Kas. Beban dan aset di tab Beban & Aset. Isi per karton di bahan "Karton sabun" pada tab Stok. Kode SKU marketplace diatur per produk di tab Stok.</p>
   </div>
   ${S.canWrite?`<div class="panel" style="max-width:640px"><h3>Data impor</h3>
     <p class="hint">${num(S.orderdays.reduce((a,d)=>a+(d.orders||[]).length,0))} pesanan impor, ${num(S.settles.length)} hari pencairan, ${num(S.adsdaily.length)} hari data iklan, ${num(S.adsreports.length)} laporan iklan. Menghapus data impor tidak menyentuh pesanan manual, beban, atau rekening.</p>
