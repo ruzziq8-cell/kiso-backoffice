@@ -260,7 +260,12 @@ function spBalDay(d,rows,bill){const paid=rows.filter(x=>x.ty==="Pembayaran deng
 const BANK_ACC=()=>(S.accounts.find(a=>a.id==="bank-pt")||S.accounts.find(a=>a.type==="bank")||{}).id;
 /* Shopee affiliate ads on Meta (Meta_Ads_List): lifetime totals per ad, newest list wins per ad, spend spread evenly over the ad's days */
 function metaAdsSet(){const M={};for(const r of S.adsreports.filter(r=>r.kind==="shopeemeta").sort((a,b)=>(a.to||"").localeCompare(b.to||"")||(a.created||0)-(b.created||0)))for(const x of r.rows||[])if(x.from)M[x.id||x.name]={...x,to:x.to||r.to};
-  return Object.values(M).filter(x=>x.from<=x.to).map(x=>({...x,len:mdays(x.from,x.to)}));}
+  const out=Object.values(M).filter(x=>x.from<=x.to).map(x=>({...x,len:mdays(x.from,x.to)}));
+  /* daily "Daily Ads Deduction" rows (RiwayatTransaksi export) fill the days after the lifetime list's coverage; newest file wins per day */
+  const cover=out.reduce((a,x)=>x.to>a?x.to:a,""),D={};
+  for(const r of S.adsreports.filter(r=>r.kind==="shopeemetaday").sort((a,b)=>(a.created||0)-(b.created||0)))for(const x of r.rows||[])if(x.date)D[x.date]=+x.spend||0;
+  for(const [d,v] of Object.entries(D))if(d>cover&&v)out.push({id:"metaday-"+d,name:"potongan harian",from:d,to:d,len:1,spend:v,gmv:0,orders:0,views:0,clicks:0});
+  return out;}
 function metaAdSpend(a,b){let t=0;for(const r of metaAdsSet()){const f=r.from>a?r.from:a,e=r.to<b?r.to:b;if(f<=e)t+=r.spend*mdays(f,e)/r.len;}return t;}
 /* Shopee ad-balance transaction history (Riwayat Transaksi saldo iklan), per day; the newest file wins for each day it covers */
 function spBill(){const B={};for(const r of S.adsreports.filter(r=>r.kind==="shopeebill"&&r.from&&r.to).sort((a,b)=>a.to.localeCompare(b.to)||(a.created||0)-(b.created||0))){
@@ -1559,6 +1564,16 @@ function parseShopeeBalance(first,name){
   rows.sort((a,b)=>(a.d+a.t).localeCompare(b.d+b.t));
   return{kind:"report",ch:SP,rkind:"shopeebal",name,label:"Transaksi saldo penjual Shopee",rows,summary:{end,endT},from:g("Dari")||rows[0]?.d,to:g("Ke")||rows[rows.length-1]?.d};
 }
+/* Shopee "RiwayatTransaksi" export of the Meta affiliate ads balance: one "Daily Ads Deduction" row per day of spend */
+function parseShopeeMetaDaily(rows,name){
+  const v=x=>clean(x).replace(/^="?/,"").replace(/"$/,""),D={};
+  for(const r of rows){if(!/meta/i.test(v(r["Saluran"]))||!/deduction/i.test(v(r["Aksi"])))continue;
+    const m=/(\d{2})\/(\d{2})\/(\d{4})/.exec(v(r["Periode Waktu"])||v(r["Tanggal"]));if(!m)continue;
+    const d=`${m[3]}-${m[2]}-${m[1]}`,n=Math.abs(Number(v(r["Nominal"]).replace(/,/g,""))||0);D[d]=(D[d]||0)+n;}
+  const out=Object.entries(D).sort().map(([date,spend])=>({date,spend}));
+  if(!out.length)return{kind:"skip",name,label:"Riwayat transaksi iklan Meta",why:"Tidak ada potongan harian iklan Meta di file ini."};
+  return{kind:"report",ch:SP,rkind:"shopeemetaday",name,label:"Potongan harian iklan afiliasi Meta (Shopee)",rows:out,from:out[0].date,to:out[out.length-1].date};
+}
 function parseShopeeMeta(rows,name){
   const fm=/(20\d{2})(\d{2})(\d{2})\d{4}/.exec(name),asOf=fm?`${fm[1]}-${fm[2]}-${fm[3]}`:today();
   const out=rows.filter(r=>r["Nama Iklan"]).map(r=>{const p=clean(r["Periode"]),m=/(\d{4}-\d{2}-\d{2})(?:.*?(\d{4}-\d{2}-\d{2}))?/.exec(p),to=m&&m[2]&&m[2]<asOf?m[2]:asOf;
@@ -1786,6 +1801,7 @@ async function analyze(file){
     if(hdr.has("No. Pesanan")&&hdr.has("Nomor Referensi SKU"))return parseShopeeOrders(table(first,"No. Pesanan"),file.name);
     if(wb.SheetNames.some(n=>/Performa Terbaik/i.test(n)))return parseShopeeExtra("shopeesku",wb,file.name);
     if(hdr.has("Komisi ID")&&hdr.has("Biaya Iklan(Rp)"))return parseShopeeMeta(table(first,"Komisi ID")||[],file.name);
+    if(hdr.has("Saluran")&&hdr.has("Aksi")&&hdr.has("Nominal")&&hdr.has("Periode Waktu"))return parseShopeeMetaDaily(table(first,"Saluran")||[],file.name);
     if(first.some(r=>clean(r[0])==="Tanggal Transaksi"&&r.map(clean).includes("Tipe Transaksi")&&r.map(clean).includes("Saldo Akhir")))return parseShopeeBalance(first,file.name);
     if(hdr.has("Deskripsi")&&hdr.has("Jumlah")&&hdr.has("Waktu")&&first.some(r=>/Riwayat Transaksi/i.test(clean(r[0])))&&first.some(r=>/Isi Saldo|Product Ad|Iklan/i.test(clean(r[2]))))return parseShopeeBill(first,file.name);
     if(hdr.has("Nama Iklan")&&hdr.has("Efektifitas Iklan")){
@@ -1856,6 +1872,7 @@ function impHtml(busy){
     }else if(x.kind==="report"&&x.rkind==="shopeesource"){d=`<div>${fdate(x.from)} – ${fdate(x.to)} · penjualan ${rp(x.summary.sales)}, ${num(x.summary.visitors)} pengunjung. Dipakai untuk analitik sumber penjualan saja.</div>`;
     }else if(x.kind==="report"&&(x.rkind==="ttshop"||x.rkind==="ttprod")){const t=x.rkind==="ttshop"?x.summary.tot:null,c=x.summary?.chg||{};
       d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${t?`GMV ${rp0(t.gmv||0)} · ${num(t.orders||0)} pesanan · ${num(t.impr||0)} impresi · ${num(t.clicks||0)} klik${c.gmv!=null?` · GMV ${c.gmv>0?"+":""}${c.gmv.toFixed(1).replace(".",",")}% vs ${esc(x.summary.cmp)}`:""}`:`${num(x.rows.length)} produk`}.</div><div class="hint">Untuk analitik saja (tab Iklan & Analitik → TikTok Shop, dan Analisa Kinerja). Tidak mengubah omzet, saldo, atau stok.</div>`;
+    }else if(x.kind==="report"&&x.rkind==="shopeemetaday"){const t=x.rows.reduce((a,r)=>a+(+r.spend||0),0);d=`<div>${fdate(x.from)} – ${fdate(x.to)} · ${num(x.rows.length)} hari · biaya iklan Meta ${rp(t)}.</div><div class="hint">Potongan harian dari saldo iklan Meta, masuk biaya Iklan Shopee per hari dan mengurangi Saldo Iklan Meta. Hanya hari setelah cakupan file Meta_Ads_List terakhir yang dipakai, supaya tidak dobel.</div>`;
     }else if(x.kind==="report"&&x.rkind==="shopeemeta"){const t=k=>x.rows.reduce((a,r)=>a+(+r[k]||0),0);d=`<div>${num(x.rows.length)} iklan · ${fdate(x.from)} – ${fdate(x.to)} · biaya ${rp(t("spend"))} · penjualan ${rp(t("gmv"))} (${num(t("orders"))} pesanan) · ROAS ${t("spend")?(t("gmv")/t("spend")).toFixed(2):"–"}.</div><div class="hint">Angka di file ini total sejak iklan mulai, jadi file terbaru menggantikan yang lama. Biaya dibagi rata per hari sejak iklan mulai, masuk biaya Iklan Shopee, dan mengurangi rekening Saldo Iklan Meta (Shopee). Isi saldonya diambil dari file transaksi saldo penjual (isi ulang yang tidak ada di riwayat saldo iklan Shopee).</div>`;
     }else if(x.kind==="report"&&x.rkind==="shopeebal"){const st=S.settles.filter(d=>d.ch===SP).map(d=>d.date).sort()[0]||"",use=x.rows.filter(r=>r.d>=st),sum=f=>use.filter(f).reduce((a,r)=>a+r.a,0);
       d=`<div>${fdate(x.from)} – ${fdate(x.to)} · saldo akhir di file ${rp(x.summary.end||0)}. Dipakai mulai ${fdate(st)}: isi ulang saldo iklan/koin ${rp(-sum(r=>r.ty==="Pembayaran dengan Saldo Penjual"))}, penyesuaian ${rp(sum(r=>r.ty==="Penyesuaian"))}, penarikan dana ${rp(-sum(r=>r.ty==="Penarikan Dana"))}.</div><div class="hint">Penghasilan pesanan tidak diambil dari file ini (sudah dari file Income). Isi ulang dicocokkan dengan riwayat saldo iklan: selisih 11% dicatat sebagai PPN iklan, sisanya sebagai Koin Penjual. Penarikan dana yang sudah dicatat manual sebagai transfer tidak dicatat dua kali.</div>`;
@@ -1892,7 +1909,7 @@ async function saveImport(withdrawAcc,progress){
   const db=S.db,jobs=[];
   if((IMP.some(x=>x.kind==="adsdaily")||IMP.some(x=>x.kind==="income"&&x.adjs.some(a=>/iklan/i.test(a.type))))&&!byId("accounts",ADS_ACC))jobs.push(["Membuat rekening Saldo Iklan TikTok",()=>db.collection("accounts").doc(ADS_ACC).set({name:"Saldo Iklan TikTok",type:"marketplace",opening:0,sort:4,created:Date.now()})]);
   if(IMP.some(x=>x.rkind==="shopeeads"||x.rkind==="shopeebill"||(x.kind==="income"&&x.ch===SP))&&!byId("accounts",ADS_SP_ACC))jobs.push(["Membuat rekening Saldo Iklan Shopee",()=>db.collection("accounts").doc(ADS_SP_ACC).set({name:"Saldo Iklan Shopee",type:"marketplace",opening:0,sort:6,created:Date.now()})]);
-  if(IMP.some(x=>x.rkind==="shopeemeta"||x.rkind==="shopeebal")&&!byId("accounts",ADS_META_ACC))jobs.push(["Membuat rekening Saldo Iklan Meta (Shopee)",()=>db.collection("accounts").doc(ADS_META_ACC).set({name:"Saldo Iklan Meta (Shopee)",type:"marketplace",opening:0,sort:7,created:Date.now()})]);
+  if(IMP.some(x=>x.rkind==="shopeemeta"||x.rkind==="shopeemetaday"||x.rkind==="shopeebal")&&!byId("accounts",ADS_META_ACC))jobs.push(["Membuat rekening Saldo Iklan Meta (Shopee)",()=>db.collection("accounts").doc(ADS_META_ACC).set({name:"Saldo Iklan Meta (Shopee)",type:"marketplace",opening:0,sort:7,created:Date.now()})]);
   for(const ch of [TT,SP])if(IMP.some(x=>x.kind==="income"&&x.ch===ch)&&!byId("accounts",CHX[ch].acc))jobs.push([`Membuat rekening ${CHX[ch].accName}`,()=>db.collection("accounts").doc(CHX[ch].acc).set({name:CHX[ch].accName,type:"marketplace",opening:0,sort:ch===TT?3:5,created:Date.now()})]);
   mergeProdCamp(IMP);const custJobs=new Map();
   for(const x of IMP){if(x.kind==="skip")continue;trimOld(x);
