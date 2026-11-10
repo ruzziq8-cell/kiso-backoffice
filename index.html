@@ -182,6 +182,7 @@ dialog form{display:grid;gap:14px;padding:18px}
       <button role="tab" data-tab="ar">Piutang</button>
       <button role="tab" data-tab="emp">Piutang Karyawan</button>
       <button role="tab" data-tab="ads">Iklan & Analitik</button>
+      <button role="tab" data-tab="video">Analisa Video</button>
       <button role="tab" data-tab="report">Laporan</button>
       <button role="tab" data-tab="set">Pengaturan</button>
     </nav>
@@ -292,7 +293,7 @@ document.getElementById("themeBtn")?.addEventListener("click",()=>{const i=THEME
    Write protection for view-only accounts is enforced by claude.ai; module hiding for editors is a display rule. ---------- */
 const ROLES={
   ceo:{name:"CEO",tabs:"*",write:true,desc:"Melihat dan mengubah semua modul, termasuk Kalkulator Laba (khusus CEO)"},
-  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","emp","ads","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
+  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","emp","ads","video","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
   gudang:{name:"Gudang",tabs:["stock"],write:true,desc:"Hanya modul Stok (melihat dan mengubah)"},
   pemilik:{name:"Pemilik",tabs:"*",write:false,desc:"Melihat semua modul (kecuali Kalkulator Laba), tidak bisa mengubah apa pun"},
 };
@@ -1320,6 +1321,71 @@ V.calc=()=>{
   </div><p class="hint">Harga jual = harga setelah diskon penjual (harga coret tidak dihitung). Voucher ditanggung penjual diisi dalam rupiah per pesanan; potongan persen marketplace dihitung dari harga setelah voucher. Harga kosong = rata-rata harga jual aktual produk ini di channel itu (kalau belum ada penjualan, harga jual di Harga & Margin).</p></div>
   <div id="calcOut">${calcOut()}</div>`;
 };
+/* ---------- Analisa Video: TikTok "Creatives video data" export (one row per video: biaya, penghasilan, pesanan, CTR, CVR, hook 2/6 detik) ---------- */
+function parseTTVideo(rows,name){
+  const per=periodFromName(name)||[M()+"-01",endOf(M())],n=v=>nv(v),r4=v=>{const x=Number(String(v??"").replace(/,/g,"."));return isFinite(x)?x:0;};
+  const all=rows.filter(r=>r["ID video"]),out=all.map(r=>({id:String(r["ID video"]),title:[...clean(r["Judul video"]||"")].slice(0,90).join(""),acct:clean(r["Nama pengguna"]||""),
+    prod:[...clean(r["Nama produk"]||"")].slice(0,60).join(""),auth:clean(r["Jenis otorisasi"]||""),post:String(r["Waktu posting"]||"").slice(0,10),
+    gmv:n(r["Penghasilan bruto"]),orders:n(r["Pesanan SKU"]),spend:n(r["Biaya"]),impr:n(r["Impresi iklan produk"]),clicks:n(r["Jumlah klik iklan produk"]),
+    cvr:r4(r["Tingkat konversi iklan"]),v2:r4(r["Rasio tayang video iklan 2 detik"]),v6:r4(r["Rasio tayang video iklan 6 detik"])})).filter(x=>x.spend>0||x.gmv>0);
+  if(!out.length)return{kind:"skip",name,label:"Data video iklan",why:"Tidak ada video dengan biaya atau penjualan di file ini."};
+  return{kind:"report",ch:TT,rkind:"videocre",name,label:"Analisa video iklan (per video)",rows:out,summary:{total:all.length,creators:new Set(all.map(r=>r["Nama pengguna"])).size},from:per[0],to:per[1]};
+}
+const VQ={q:"",sort:"spend",band:""};
+function videoRep(){return S.adsreports.filter(r=>r.kind==="videocre").sort((a,b)=>(b.to||"").localeCompare(a.to||"")||(mdays(b.from,b.to)-mdays(a.from,a.to))||(b.created||0)-(a.created||0))[0]||null;}
+function videoBe(rep){let b=null;try{b=perfData(rep.to.slice(0,7),TT).beRoas;}catch(e){}return b&&isFinite(b)?b:2.5;}
+function videoBand(x,be){const r=x.spend?x.gmv/x.spend:null;return !x.spend?"org":r<be?"rugi":r<4?"tipis":"untung";}
+function videoTable(){const rep=videoRep();if(!rep)return"";const be=videoBe(rep),q=VQ.q.toLowerCase();
+  let L=(rep.rows||[]).filter(x=>(!q||(x.title+" "+x.acct).toLowerCase().includes(q))&&(!VQ.band||videoBand(x,be)===VQ.band));
+  const key={spend:x=>x.spend,gmv:x=>x.gmv,roas:x=>x.spend?x.gmv/x.spend:-1,orders:x=>x.orders,ctr:x=>x.impr?x.clicks/x.impr:0}[VQ.sort]||(x=>x.spend);
+  L=L.sort((a,b)=>key(b)-key(a));const shown=L.slice(0,150),p=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
+  const pill=x=>{const b=videoBand(x,be);return b==="rugi"?'<span class="pill bad">Rugi</span>':b==="tipis"?'<span class="pill warn">Tipis</span>':b==="untung"?'<span class="pill good">Untung</span>':'<span class="pill">Organik</span>';};
+  return`<p class="hint">${num(L.length)} video cocok${L.length>shown.length?`, ditampilkan ${num(shown.length)} teratas`:""}.</p><div class="tbl"><table><thead><tr><th>Video</th><th>Akun</th><th>Posting</th><th class="n">Biaya</th><th class="n">Pesanan</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Biaya / pesanan</th><th class="n">CTR</th><th class="n">Konversi</th><th class="n">Tonton 2 dtk</th><th class="n">Tonton 6 dtk</th><th>Status</th></tr></thead><tbody>
+  ${shown.map(x=>`<tr><td class="wrapcell">${esc(x.title||"(tanpa judul)")}</td><td>@${esc(x.acct)}</td><td>${x.post?fdate(x.post):"–"}</td><td class="n">${rp0(x.spend)}</td><td class="n">${num(x.orders)}</td><td class="n">${rp0(x.gmv)}</td><td class="n">${x.spend?f2(x.gmv/x.spend):"–"}</td><td class="n">${x.orders&&x.spend?rp0(x.spend/x.orders):"–"}</td><td class="n">${p(x.impr?x.clicks/x.impr:null)}</td><td class="n">${p(x.cvr)}</td><td class="n">${p(x.v2)}</td><td class="n">${p(x.v6)}</td><td>${pill(x)}</td></tr>`).join("")}
+  </tbody></table></div>`;}
+V.video=()=>{
+  const rep=videoRep(),head=`<div class="row"><h2>Analisa video iklan</h2></div>
+  <p class="hint">Dari file TikTok <b>Creatives video data</b> (per video: biaya iklan, penjualan, pesanan, klik, konversi, dan seberapa banyak penonton bertahan 2 dan 6 detik). Impor filenya lewat tombol Impor di tab Penjualan. Data ini untuk analisa saja, tidak mengubah laba rugi.</p>`;
+  if(!rep)return head+emptyBox("Belum ada data video","Unduh file Creatives video data dari TikTok Ads (GMV Max → Materi iklan), lalu impor lewat tab Penjualan.");
+  const R=rep.rows||[],be=videoBe(rep),paid=R.filter(x=>x.spend>0),sum=(a,f)=>a.reduce((s,x)=>s+(+x[f]||0),0);
+  const sp=sum(paid,"spend"),gm=sum(paid,"gmv"),od=sum(paid,"orders"),p=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
+  const bands=[["rugi",`ROAS di bawah ${f2(be)} (rugi)`],["tipis",`ROAS ${f2(be)}–4 (untung tipis)`],["untung","ROAS 4 ke atas (untung)"]].map(([k,l])=>{const a=paid.filter(x=>videoBand(x,be)===k);return{k,l,n:a.length,sp:sum(a,"spend"),gm:sum(a,"gmv"),od:sum(a,"orders")};});
+  const cut=paid.filter(x=>x.spend>=50000&&x.gmv/x.spend<be).sort((a,b)=>b.spend-a.spend).slice(0,15);
+  const win=paid.filter(x=>x.spend>=20000&&x.gmv/x.spend>=4).sort((a,b)=>b.gmv-a.gmv).slice(0,15);
+  const C=new Map();for(const x of R){const c=C.get(x.acct)||{acct:x.acct,n:0,spend:0,gmv:0,orders:0};c.n++;c.spend+=x.spend;c.gmv+=x.gmv;c.orders+=x.orders;C.set(x.acct,c);}
+  const cr=[...C.values()].sort((a,b)=>b.spend-a.spend||b.gmv-a.gmv).slice(0,20);
+  const avg=(a,f)=>{const w=a.reduce((s,x)=>s+x.spend,0);return w?a.reduce((s,x)=>s+x[f]*x.spend,0)/w:null;},W=paid.filter(x=>videoBand(x,be)==="untung"),Lz=paid.filter(x=>videoBand(x,be)==="rugi");
+  const mini=(a,act)=>a.length?`<div class="tbl"><table><thead><tr><th>Video</th><th>Akun</th><th class="n">Biaya</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Pesanan</th><th class="n">CTR</th><th class="n">Tonton 6 dtk</th></tr></thead><tbody>${a.map(x=>`<tr><td class="wrapcell">${esc(x.title||"(tanpa judul)")}</td><td>@${esc(x.acct)}</td><td class="n">${rp0(x.spend)}</td><td class="n">${rp0(x.gmv)}</td><td class="n">${f2(x.gmv/x.spend)}</td><td class="n">${num(x.orders)}</td><td class="n">${p(x.impr?x.clicks/x.impr:null)}</td><td class="n">${p(x.v6)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="hint">${act}</p>`;
+  return head+`<p class="hint">Periode file: <b>${fdate(rep.from)} – ${fdate(rep.to)}</b> · ${num(rep.summary?.total||R.length)} video, ${num(paid.length)} memakai biaya iklan, ${num(rep.summary?.creators||C.size)} akun kreator. ROAS impas TikTok bulan ini: <b>${f2(be)}</b>.</p>
+  <div class="kpis">
+    <div class="kpi"><span>Biaya iklan video</span><b>${rp0(sp)}</b><span>${num(paid.length)} video berbiaya</span></div>
+    <div class="kpi"><span>Penjualan dari video iklan</span><b>${rp0(gm)}</b><span>${num(od)} pesanan</span></div>
+    <div class="kpi"><span>ROAS video</span><b class="${sp&&gm/sp<be?"neg":""}">${sp?f2(gm/sp):"–"}</b><span>impas ${f2(be)}</span></div>
+    <div class="kpi"><span>Biaya terbuang (video rugi)</span><b class="neg">${rp0(bands[0].sp)}</b><span>${p(sp?bands[0].sp/sp:null)} dari biaya video</span></div></div>
+  <div class="panel"><h3>Ke mana biaya video mengalir</h3><div class="tbl"><table><thead><tr><th>Kelompok</th><th class="n">Video</th><th class="n">Biaya</th><th class="n">Porsi biaya</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Pesanan</th></tr></thead><tbody>
+  ${bands.map(b=>`<tr class="click" data-vband="${b.k}"><td>${b.l}</td><td class="n">${num(b.n)}</td><td class="n">${rp0(b.sp)}</td><td class="n">${p(sp?b.sp/sp:null)}</td><td class="n">${rp0(b.gm)}</td><td class="n">${b.sp?f2(b.gm/b.sp):"–"}</td><td class="n">${num(b.od)}</td></tr>`).join("")}
+  </tbody></table></div>
+  <p class="hint">Rata-rata (ditimbang biaya) video untung vs rugi — CTR ${p(avg(W.map(x=>({...x,ctr:x.impr?x.clicks/x.impr:0})),"ctr"))} vs ${p(avg(Lz.map(x=>({...x,ctr:x.impr?x.clicks/x.impr:0})),"ctr"))}, konversi ${p(avg(W,"cvr"))} vs ${p(avg(Lz,"cvr"))}, tonton 2 detik ${p(avg(W,"v2"))} vs ${p(avg(Lz,"v2"))}, tonton 6 detik ${p(avg(W,"v6"))} vs ${p(avg(Lz,"v6"))}. Klik baris kelompok untuk memfilter daftar video di bawah.</p></div>
+  <div class="grid2">
+   <div class="panel"><h3>Keluarkan dari iklan</h3><p class="hint">Biaya ≥ Rp50.000 dan ROAS di bawah impas. Keluarkan dari materi GMV Max (konten organiknya tetap jalan), lalu pantau 3 hari.</p>${mini(cut,"Tidak ada video rugi dengan biaya besar. Bagus.")}</div>
+   <div class="panel"><h3>Video pemenang</h3><p class="hint">Biaya ≥ Rp20.000 dan ROAS ≥ 4. Pola hook dan kreatornya dijadikan acuan brief video baru.</p>${mini(win,"Belum ada video dengan ROAS ≥ 4 dan biaya cukup besar.")}</div>
+  </div>
+  <div class="panel"><h3>Per akun kreator</h3><div class="tbl"><table><thead><tr><th>Akun</th><th class="n">Video</th><th class="n">Biaya</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Pesanan</th><th>Status</th></tr></thead><tbody>
+  ${cr.map(c=>`<tr class="click" data-vacct="${esc(c.acct)}"><td>@${esc(c.acct)}</td><td class="n">${num(c.n)}</td><td class="n">${rp0(c.spend)}</td><td class="n">${rp0(c.gmv)}</td><td class="n">${c.spend?f2(c.gmv/c.spend):"–"}</td><td class="n">${num(c.orders)}</td><td>${!c.spend?'<span class="pill">Organik</span>':c.gmv/c.spend<be?'<span class="pill bad">Rugi</span>':c.gmv/c.spend<4?'<span class="pill warn">Tipis</span>':'<span class="pill good">Untung</span>'}</td></tr>`).join("")}
+  </tbody></table></div><p class="hint">Klik akun untuk melihat semua videonya di daftar bawah.</p></div>
+  <div class="panel"><div class="row"><h3>Semua video</h3><div class="sp"></div>
+   <input type="search" data-vq placeholder="Cari judul atau akun…" value="${esc(VQ.q)}" style="max-width:220px">
+   <select data-vsort>${[["spend","Urut: biaya"],["gmv","Urut: penjualan"],["roas","Urut: ROAS"],["orders","Urut: pesanan"],["ctr","Urut: CTR"]].map(([v,l])=>`<option value="${v}"${VQ.sort===v?" selected":""}>${l}</option>`).join("")}</select>
+   <select data-vbandsel>${[["","Semua status"],["rugi","Rugi"],["tipis","Untung tipis"],["untung","Untung"],["org","Organik (tanpa biaya)"]].map(([v,l])=>`<option value="${v}"${VQ.band===v?" selected":""}>${l}</option>`).join("")}</select></div>
+   <div id="vtbl">${videoTable()}</div></div>`;
+};
+document.addEventListener("input",e=>{const t=e.target;if(t.matches&&t.matches("[data-vq]")){VQ.q=t.value;const el=document.getElementById("vtbl");if(el)el.innerHTML=videoTable();}});
+document.addEventListener("change",e=>{const t=e.target;if(!t.matches)return;if(t.matches("[data-vsort]")){VQ.sort=t.value;const el=document.getElementById("vtbl");if(el)el.innerHTML=videoTable();}
+  if(t.matches("[data-vbandsel]")){VQ.band=t.value;const el=document.getElementById("vtbl");if(el)el.innerHTML=videoTable();}});
+document.addEventListener("click",e=>{const t=e.target.closest&&e.target.closest("[data-vband],[data-vacct]");if(!t)return;
+  if(t.dataset.vband){VQ.band=t.dataset.vband;VQ.q="";}else{VQ.q=t.dataset.vacct;VQ.band="";}
+  const s=document.querySelector("[data-vq]"),b=document.querySelector("[data-vbandsel]");if(s)s.value=VQ.q;if(b)b.value=VQ.band;
+  const el=document.getElementById("vtbl");if(el){el.innerHTML=videoTable();el.scrollIntoView({behavior:"smooth",block:"start"});}});
 /* ---------- Piutang karyawan: kasbon/pinjaman karyawan dan pembayarannya (tunai/transfer atau potong gaji) ---------- */
 function empState(asOf="9999-12-31"){const E={};
   for(const x of S.emploans){if((x.date||"")>asOf||!x.emp)continue;const k=skey(x.emp),e=E[k]||={name:x.emp,loan:0,paid:0,plan:0,lastLoan:"",lastPay:"",n:0};e.n++;
@@ -1834,8 +1900,8 @@ async function analyze(file){
     if(hdr.has("ID live room"))return parseAds("live",t("ID live room"),file.name);
     if(hdr.has("Anggaran saat ini"))return parseAds(hdr.has("Tayangan LIVE")?"livecampaign":"prodcampaign",t("ID Campaign"),file.name);
     if(hdr.has("ID postingan"))return parseAds(hdr.has("Nama produk")?"creativeprod":"creative",t("ID postingan"),file.name);
-    /* "Creatives video data" export: one row per video (ID video / Judul video / Nama pengguna) - same meaning as the ad creative report, never product data */
-    if(hdr.has("ID video")&&hdr.has("Judul video"))return parseAds("creativeprod",(t("ID video")||[]).map(r=>({...r,"ID postingan":r["ID video"],"Materi Iklan":r["Judul video"],"Akun TikTok":r["Nama pengguna"],"Jenis materi iklan":r["Jenis otorisasi"]})),file.name);
+    /* "Creatives video data" export: one row per video - its own module (Analisa Video), never product data */
+    if(hdr.has("ID video")&&hdr.has("Judul video"))return parseTTVideo(t("ID video")||[],file.name);
     if(hdr.has("Nama produk")&&hdr.has("Nama kampanye"))return parseAds("product",t("Nama produk"),file.name);
     if(hdr.has("Nama produk")&&hdr.has("ID produk")){const per=periodFromName(file.name)||[M()+"-01",endOf(M())];
       return{kind:"report",ch:TT,rkind:"productcamp",camp:(/Campaign_(\d+)/.exec(file.name)||[])[1]||"",name:file.name,label:"Data produk satu kampanye",rows:(t("Nama produk")||[]).map(r=>({prod:clean(r["Nama produk"]).slice(0,80),spend:nv(r["Biaya"]),orders:nv(r["Pesanan SKU"]),gmv:nv(r["Pendapatan kotor"])})),from:per[0],to:per[1]};}
