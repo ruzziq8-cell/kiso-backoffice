@@ -1355,6 +1355,16 @@ V.video=()=>{
   const C=new Map();for(const x of R){const c=C.get(x.acct)||{acct:x.acct,n:0,spend:0,gmv:0,orders:0};c.n++;c.spend+=x.spend;c.gmv+=x.gmv;c.orders+=x.orders;C.set(x.acct,c);}
   const cr=[...C.values()].sort((a,b)=>b.spend-a.spend||b.gmv-a.gmv).slice(0,20);
   const avg=(a,f)=>{const w=a.reduce((s,x)=>s+x.spend,0);return w?a.reduce((s,x)=>s+x[f]*x.spend,0)/w:null;},W=paid.filter(x=>videoBand(x,be)==="untung"),Lz=paid.filter(x=>videoBand(x,be)==="rugi");
+  const wctr=avg(W.map(x=>({...x,ctr:x.impr?x.clicks/x.impr:0})),"ctr"),wcvr=avg(W,"cvr"),wv2=avg(W,"v2"),wv6=avg(W,"v6"),wsp=sum(W,"spend"),wod=sum(W,"orders"),wcpo=wod?wsp/wod:null;
+  const why=x=>{const r=[],ctr=x.impr?x.clicks/x.impr:null,cpo=x.orders?x.spend/x.orders:null;
+    r.push(`<b>Rugi</b>: tiap Rp1 iklan kembali Rp${f2(x.gmv/x.spend)} (impas ${f2(be)}).`);
+    if(!x.orders)r.push("Belum menghasilkan pesanan sama sekali.");
+    if(wcvr&&x.cvr<wcvr*0.6)r.push(`<b>Yang klik tidak membeli</b>: konversi ${p(x.cvr)} vs ${p(wcvr)} di video untung.`);
+    if(wctr&&ctr!=null&&ctr>=wctr&&((wv6&&x.v6>=wv6)||(wv2&&x.v2>=wv2)))r.push(`<b>Menarik tapi tidak menjual</b>: CTR ${p(ctr)} dan tonton 6 detik ${p(x.v6)} di atas video untung (${p(wctr)} / ${p(wv6)}) — cocok jadi konten organik, bukan iklan.`);
+    if(wctr&&ctr!=null&&ctr<wctr*0.6&&wv2&&x.v2<wv2*0.8)r.push(`<b>Hook lemah</b>: CTR ${p(ctr)} dan tonton 2 detik ${p(x.v2)}, penonton pergi di awal video.`);
+    if(cpo&&wcpo&&cpo>wcpo*2)r.push(`<b>Biaya per pesanan mahal</b>: ${rp0(cpo)} vs ${rp0(wcpo)} di video untung.`);
+    return r.map(s=>`<div>• ${s}</div>`).join("");};
+  const cutTbl=cut.length?`<div class="tbl"><table><thead><tr><th>Video</th><th>Akun</th><th class="n">Biaya</th><th class="n">Penjualan</th><th class="n">Pesanan</th><th>Alasan dikeluarkan</th></tr></thead><tbody>${cut.map(x=>`<tr><td class="wrapcell">${esc(x.title||"(tanpa judul)")}</td><td>@${esc(x.acct)}</td><td class="n">${rp0(x.spend)}</td><td class="n">${rp0(x.gmv)}</td><td class="n">${num(x.orders)}</td><td class="wrapcell" style="min-width:260px">${why(x)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="hint">Tidak ada video rugi dengan biaya besar. Bagus.</p>`;
   const mini=(a,act)=>a.length?`<div class="tbl"><table><thead><tr><th>Video</th><th>Akun</th><th class="n">Biaya</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Pesanan</th><th class="n">CTR</th><th class="n">Tonton 6 dtk</th></tr></thead><tbody>${a.map(x=>`<tr><td class="wrapcell">${esc(x.title||"(tanpa judul)")}</td><td>@${esc(x.acct)}</td><td class="n">${rp0(x.spend)}</td><td class="n">${rp0(x.gmv)}</td><td class="n">${f2(x.gmv/x.spend)}</td><td class="n">${num(x.orders)}</td><td class="n">${p(x.impr?x.clicks/x.impr:null)}</td><td class="n">${p(x.v6)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="hint">${act}</p>`;
   return head+`<p class="hint">Periode file: <b>${fdate(rep.from)} – ${fdate(rep.to)}</b> · ${num(rep.summary?.total||R.length)} video, ${num(paid.length)} memakai biaya iklan, ${num(rep.summary?.creators||C.size)} akun kreator. ROAS impas TikTok bulan ini: <b>${f2(be)}</b>.</p>
   <div class="kpis">
@@ -1367,7 +1377,7 @@ V.video=()=>{
   </tbody></table></div>
   <p class="hint">Rata-rata (ditimbang biaya) video untung vs rugi — CTR ${p(avg(W.map(x=>({...x,ctr:x.impr?x.clicks/x.impr:0})),"ctr"))} vs ${p(avg(Lz.map(x=>({...x,ctr:x.impr?x.clicks/x.impr:0})),"ctr"))}, konversi ${p(avg(W,"cvr"))} vs ${p(avg(Lz,"cvr"))}, tonton 2 detik ${p(avg(W,"v2"))} vs ${p(avg(Lz,"v2"))}, tonton 6 detik ${p(avg(W,"v6"))} vs ${p(avg(Lz,"v6"))}. Klik baris kelompok untuk memfilter daftar video di bawah.</p></div>
   <div class="grid2">
-   <div class="panel"><h3>Keluarkan dari iklan</h3><p class="hint">Biaya ≥ Rp50.000 dan ROAS di bawah impas. Keluarkan dari materi GMV Max (konten organiknya tetap jalan), lalu pantau 3 hari.</p>${mini(cut,"Tidak ada video rugi dengan biaya besar. Bagus.")}</div>
+   <div class="panel"><h3>Keluarkan dari iklan</h3><p class="hint">Biaya ≥ Rp50.000 dan ROAS di bawah impas. Alasan tiap video dibandingkan dengan rata-rata video yang untung: video rugi biasanya <b>lebih sering ditonton dan diklik, tapi yang membeli jauh lebih sedikit</b> — penonton terhibur, bukan berniat beli. Video seperti itu tetap boleh jalan sebagai konten organik, tapi jangan diberi biaya iklan. Keluarkan dari materi GMV Max lalu pantau 3 hari.</p>${cutTbl}</div>
    <div class="panel"><h3>Video pemenang</h3><p class="hint">Biaya ≥ Rp20.000 dan ROAS ≥ 4. Pola hook dan kreatornya dijadikan acuan brief video baru.</p>${mini(win,"Belum ada video dengan ROAS ≥ 4 dan biaya cukup besar.")}</div>
   </div>
   <div class="panel"><h3>Per akun kreator</h3><div class="tbl"><table><thead><tr><th>Akun</th><th class="n">Video</th><th class="n">Biaya</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Pesanan</th><th>Status</th></tr></thead><tbody>
