@@ -1323,7 +1323,7 @@ V.calc=()=>{
 };
 /* ---------- Analisa Video: TikTok "Creatives video data" export (one row per video: biaya, penghasilan, pesanan, CTR, CVR, hook 2/6 detik) ---------- */
 function parseTTVideo(rows,name){
-  const per=periodFromName(name)||[M()+"-01",endOf(M())],n=v=>nv(v),r4=v=>{const x=Number(String(v??"").replace(/,/g,"."));return isFinite(x)?x:0;};
+  const per=periodFromName(name)||[M()+"-01",endOf(M())],n=v=>nv(v),r4=v=>{let t=String(v??"").trim();const pc=/%$/.test(t);t=t.replace(/%$/,"").replace(/\./g,pc&&/,/.test(t)?"":".").replace(/,/g,".");const x=Number(t);return isFinite(x)?(pc?x/100:x):0;};
   const all=rows.filter(r=>r["ID video"]),out=all.map(r=>({id:String(r["ID video"]),title:[...clean(r["Judul video"]||"")].slice(0,90).join(""),acct:clean(r["Nama pengguna"]||""),
     prod:[...clean(r["Nama produk"]||"")].slice(0,60).join(""),auth:clean(r["Jenis otorisasi"]||""),post:String(r["Waktu posting"]||"").slice(0,10),
     gmv:n(r["Penghasilan bruto"]),orders:n(r["Pesanan SKU"]),spend:n(r["Biaya"]),impr:n(r["Impresi iklan produk"]),clicks:n(r["Jumlah klik iklan produk"]),
