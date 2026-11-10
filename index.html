@@ -1834,6 +1834,8 @@ async function analyze(file){
     if(hdr.has("ID live room"))return parseAds("live",t("ID live room"),file.name);
     if(hdr.has("Anggaran saat ini"))return parseAds(hdr.has("Tayangan LIVE")?"livecampaign":"prodcampaign",t("ID Campaign"),file.name);
     if(hdr.has("ID postingan"))return parseAds(hdr.has("Nama produk")?"creativeprod":"creative",t("ID postingan"),file.name);
+    /* "Creatives video data" export: one row per video (ID video / Judul video / Nama pengguna) - same meaning as the ad creative report, never product data */
+    if(hdr.has("ID video")&&hdr.has("Judul video"))return parseAds("creativeprod",(t("ID video")||[]).map(r=>({...r,"ID postingan":r["ID video"],"Materi Iklan":r["Judul video"],"Akun TikTok":r["Nama pengguna"],"Jenis materi iklan":r["Jenis otorisasi"]})),file.name);
     if(hdr.has("Nama produk")&&hdr.has("Nama kampanye"))return parseAds("product",t("Nama produk"),file.name);
     if(hdr.has("Nama produk")&&hdr.has("ID produk")){const per=periodFromName(file.name)||[M()+"-01",endOf(M())];
       return{kind:"report",ch:TT,rkind:"productcamp",camp:(/Campaign_(\d+)/.exec(file.name)||[])[1]||"",name:file.name,label:"Data produk satu kampanye",rows:(t("Nama produk")||[]).map(r=>({prod:clean(r["Nama produk"]).slice(0,80),spend:nv(r["Biaya"]),orders:nv(r["Pesanan SKU"]),gmv:nv(r["Pendapatan kotor"])})),from:per[0],to:per[1]};}
