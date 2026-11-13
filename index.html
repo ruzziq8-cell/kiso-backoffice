@@ -169,6 +169,7 @@ dialog form{display:grid;gap:14px;padding:18px}
     <nav role="tablist" id="tabs">
       <button role="tab" data-tab="dash">Dashboard</button>
       <button role="tab" data-tab="daily">Laporan Harian</button>
+      <button role="tab" data-tab="weekly">Ringkasan Mingguan</button>
       <button role="tab" data-tab="perf">Analisa Kinerja</button>
       <button role="tab" data-tab="cust">Pelanggan</button>
       <button role="tab" data-tab="sales">Penjualan</button>
@@ -293,7 +294,7 @@ document.getElementById("themeBtn")?.addEventListener("click",()=>{const i=THEME
    Write protection for view-only accounts is enforced by claude.ai; module hiding for editors is a display rule. ---------- */
 const ROLES={
   ceo:{name:"CEO",tabs:"*",write:true,desc:"Melihat dan mengubah semua modul, termasuk Kalkulator Laba (khusus CEO)"},
-  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","emp","ads","video","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
+  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","weekly","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","emp","ads","video","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
   gudang:{name:"Gudang",tabs:["stock"],write:true,desc:"Hanya modul Stok (melihat dan mengubah)"},
   pemilik:{name:"Pemilik",tabs:"*",write:false,desc:"Melihat semua modul (kecuali Kalkulator Laba), tidak bisa mengubah apa pun"},
 };
@@ -1396,6 +1397,63 @@ document.addEventListener("click",e=>{const t=e.target.closest&&e.target.closest
   if(t.dataset.vband){VQ.band=t.dataset.vband;VQ.q="";}else{VQ.q=t.dataset.vacct;VQ.band="";}
   const s=document.querySelector("[data-vq]"),b=document.querySelector("[data-vbandsel]");if(s)s.value=VQ.q;if(b)b.value=VQ.band;
   const el=document.getElementById("vtbl");if(el){el.innerHTML=videoTable();el.scrollIntoView({behavior:"smooth",block:"start"});}});
+/* ---------- Ringkasan mingguan: 1 halaman per minggu (Senin–Minggu) — belanja & ROAS, video untung/rugi, pesanan berbayar per hari, laba setelah iklan vs target impas ---------- */
+const WK={start:null};
+const wkMon=d=>{const x=new Date(d+"T00:00");const k=(x.getDay()+6)%7;return addDays(d,-k);};
+function wkDays(a,b){const out=[];const ms=[...new Set([a.slice(0,7),b.slice(0,7)])];const D={};for(const ch of ["Semua",TT,SP])for(const m of ms)for(const x of dailyStats(m,ch))if(x.date>=a&&x.date<=b)(D[x.date]||={date:x.date})[ch]=x;
+  for(let d=a;d<=b;d=addDays(d,1))out.push(D[d]||{date:d});return out;}
+function wkData(a,b){
+  const days=wkDays(a,b),pm=pmap(),paid={},samp={},isi1={tot:0,one:0};
+  for(const o of ORD())if(o.date>=a&&o.date<=b&&counts(o)){const k=o.date+"|"+o.channel;if(isSample(o)){samp[k]=(samp[k]||0)+1;continue;}paid[k]=(paid[k]||0)+1;isi1.tot++;if((o.items||[]).every(it=>+pm[it.productId]?.pcs===1))isi1.one++;}
+  const sum=(ch,f)=>days.reduce((s,x)=>s+(+(x[ch]||{})[f]||0),0),cnt=(ch,map)=>days.reduce((s,x)=>s+(ch==="Semua"?(map[x.date+"|"+TT]||0)+(map[x.date+"|"+SP]||0):(map[x.date+"|"+ch]||0)),0);
+  const C={};for(const ch of ["Semua",TT,SP]){const ads=sum(ch,"ads"),g=sum(ch,"adsGmv"),gross=sum(ch,"gross"),cm=sum(ch,"cm");C[ch]={gross,ads,adsGmv:g,profit:sum(ch,"profit"),roas:ads?g/ads:null,be:cm>0?gross/cm:null,paid:cnt(ch,paid),samp:cnt(ch,samp)};}
+  const m=b.slice(0,7);let fixedDay=null;try{const P=perfData(m,"Semua");fixedDay=(P.fixedPlan||P.fixed||0)/P.nDays||null;}catch(e){}
+  const n=days.length,act=days.filter(x=>x.date<=today()).length||n;
+  return{a,b,days,C,paid,samp,isi1,fixedDay,n,act,target:fixedDay?fixedDay*act:null};
+}
+V.weekly=()=>{
+  const T=today();if(!WK.start)WK.start=wkMon(T);
+  const a=WK.start,b0=addDays(a,6),b=b0>T?T:b0,W=wkData(a,b),pa=addDays(a,-7),P=wkData(pa,addDays(pa,6));
+  const pc=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%",dl=(x,y)=>y?`<span class="${x>=y?"pos":"neg"}">${x>=y?"▲":"▼"} ${pc(Math.abs(x/y-1))}</span>`:"";
+  const S0=W.C["Semua"],TTc=W.C[TT],SPc=W.C[SP],perDay=v=>v/W.act,PperDay=v=>v/P.act;
+  const gap=W.target!=null?S0.profit-W.target:null;
+  const head=`<div class="row"><h2>Ringkasan mingguan</h2><div class="sp"></div><button class="btn sm" data-wk="-1">◀ Minggu sebelumnya</button><button class="btn sm" data-wk="1"${addDays(a,7)>T?" disabled":""}>Minggu berikutnya ▶</button><button class="btn sm" data-wkprint>Cetak / PDF</button></div>
+  <p class="hint"><b>${fdate(a)} – ${fdate(b)}</b>${b<b0?` (minggu berjalan, data sampai ${fdate(b)})`:""} · dibanding minggu sebelumnya ${fdate(pa)} – ${fdate(addDays(pa,6))}. Pesanan berbayar tidak termasuk sampel affiliate (harga Rp0). Target impas = beban bulanan bulan lalu ÷ jumlah hari${W.fixedDay?` = <b>${rp0(W.fixedDay)}/hari</b>`:""}.</p>`;
+  const kpi=(l,v,s,cls="")=>`<div class="kpi"><span>${l}</span><b class="${cls}">${v}</b><span>${s}</span></div>`;
+  const kp=`<div class="kpis">
+    ${kpi("Pesanan berbayar / hari",num(Math.round(perDay(S0.paid)*10)/10),`${dl(perDay(S0.paid),PperDay(P.C["Semua"].paid))} vs minggu lalu · TikTok ${num(TTc.paid)} · Shopee ${num(SPc.paid)} · sampel ${num(S0.samp)}`)}
+    ${kpi("Belanja iklan / hari",rp0(perDay(S0.ads)),`${dl(perDay(S0.ads),PperDay(P.C["Semua"].ads))} · ROAS TikTok ${f2(TTc.roas)} (impas ${f2(TTc.be)}) · Shopee ${f2(SPc.roas)}`)}
+    ${kpi("Laba setelah iklan",rp0(S0.profit),`${rp0(perDay(S0.profit))}/hari ${dl(perDay(S0.profit),PperDay(P.C["Semua"].profit))}`,S0.profit<0?"neg":"")}
+    ${kpi("Dibanding target impas",gap==null?"–":(gap>=0?"+":"−")+rp0(Math.abs(gap)),W.target!=null?`target ${rp0(W.target)} (${num(W.act)} hari) · ${gap>=0?"tercapai":"kurang "+rp0(Math.abs(gap)/W.act)+"/hari"}`:"beban bulan lalu belum ada",gap!=null&&gap<0?"neg":"pos")}</div>`;
+  const rows=W.days.map(x=>{const s=x["Semua"]||{},t=x[TT]||{},p=x[SP]||{},pd=(W.paid[x.date+"|"+TT]||0)+(W.paid[x.date+"|"+SP]||0),sm=(W.samp[x.date+"|"+TT]||0)+(W.samp[x.date+"|"+SP]||0),pr=s.profit||0,tg=W.fixedDay;
+    return`<tr><td>${new Date(x.date+"T00:00").toLocaleDateString("id-ID",{weekday:"short",day:"2-digit",month:"short"})}</td><td class="n"><b>${num(pd)}</b></td><td class="n">${num(W.paid[x.date+"|"+TT]||0)}</td><td class="n">${num(W.paid[x.date+"|"+SP]||0)}</td><td class="n mut">${num(sm)}</td><td class="n">${rp0(s.gross||0)}</td><td class="n">${rp0(s.ads||0)}</td><td class="n">${t.ads?f2(t.adsGmv/t.ads):"–"}</td><td class="n">${p.ads?f2(p.adsGmv/p.ads):"–"}</td><td class="n ${pr<0?"neg":""}">${rp0(pr)}</td><td class="n">${tg?`<span class="${pr>=tg?"pos":"neg"}">${pr>=tg?"+":"−"}${rp0(Math.abs(pr-tg))}</span>`:"–"}</td></tr>`;}).join("");
+  const tbl=`<div class="panel"><h3>Per hari</h3><div class="tbl"><table><thead><tr><th>Hari</th><th class="n">Pesanan berbayar</th><th class="n">TikTok</th><th class="n">Shopee</th><th class="n">Sampel</th><th class="n">Omzet</th><th class="n">Biaya iklan</th><th class="n">ROAS TikTok</th><th class="n">ROAS Shopee</th><th class="n">Laba setelah iklan</th><th class="n">vs target/hari</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="hint">Laba setelah iklan = omzet − potongan marketplace − HPP (termasuk HPP sampel) − biaya iklan, sebelum beban bulanan. Data hari terakhir bisa belum lengkap kalau file hari itu diunduh pagi.</p></div>`;
+  /* videos: the video report overlapping this week the most */
+  const vr=S.adsreports.filter(r=>r.kind==="videocre"&&r.from<=b&&r.to>=a).map(r=>({r,ov:mdays(r.from>a?r.from:a,r.to<b?r.to:b)})).sort((x,y)=>y.ov-x.ov||(y.r.created||0)-(x.r.created||0))[0]?.r;
+  let vid=`<div class="panel"><h3>Video iklan TikTok</h3><p class="hint">Belum ada file <b>Creatives video data</b> untuk minggu ini.</p></div>`;
+  let vWaste=null;
+  if(vr){const be=videoBe(vr),R=(vr.rows||[]).filter(x=>x.spend>0),sp=R.reduce((s,x)=>s+x.spend,0),rug=R.filter(x=>x.gmv/x.spend<be),rs=rug.reduce((s,x)=>s+x.spend,0);vWaste=sp?rs/sp:null;
+    const win=R.filter(x=>x.spend>=10000&&x.gmv/x.spend>=4).sort((x,y)=>y.gmv-x.gmv).slice(0,5),lose=rug.filter(x=>x.spend>=20000).sort((x,y)=>y.spend-x.spend).slice(0,5);
+    const li=(L,e)=>L.length?`<div class="tbl"><table><thead><tr><th>Video</th><th>Akun</th><th class="n">Biaya</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Konversi</th></tr></thead><tbody>${L.map(x=>`<tr><td class="wrapcell">${esc((x.title||"(tanpa judul)").slice(0,70))}</td><td>@${esc(x.acct)}</td><td class="n">${rp0(x.spend)}</td><td class="n">${rp0(x.gmv)}</td><td class="n">${f2(x.gmv/x.spend)}</td><td class="n">${pc(x.cvr)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="hint">${e}</p>`;
+    vid=`<div class="panel"><h3>Video iklan TikTok</h3><p class="hint">Dari file video ${fdate(vr.from)} – ${fdate(vr.to)}: biaya video ${rp0(sp)}, ROAS ${sp?f2(R.reduce((s,x)=>s+x.gmv,0)/sp):"–"}, <b class="${vWaste>0.4?"neg":""}">${pc(vWaste)} biaya masuk ke video rugi</b> (ROAS di bawah ${f2(be)}). Detail lengkap di tab Analisa Video.</p>
+    <div class="grid2"><div><h3>Pemenang (ROAS ≥ 4)</h3>${li(win,"Belum ada video pemenang dengan biaya cukup.")}</div><div><h3>Rugi — keluarkan dari iklan</h3>${li(lose,"Tidak ada video rugi dengan biaya besar.")}</div></div></div>`;}
+  /* automatic conclusions */
+  const K=[],tP=P.C[TT];
+  if(gap!=null)K.push(gap>=0?`<b class="pos">Impas tercapai</b>: laba setelah iklan ${rp0(perDay(S0.profit))}/hari, di atas target ${rp0(W.fixedDay)}/hari.`:`<b class="neg">Belum impas</b>: laba setelah iklan ${rp0(perDay(S0.profit))}/hari, kurang ${rp0(Math.abs(gap)/W.act)}/hari dari target ${rp0(W.fixedDay)}/hari.`);
+  if(P.C["Semua"].paid)K.push(`Pesanan berbayar ${num(Math.round(perDay(S0.paid)))} / hari, ${perDay(S0.paid)>=PperDay(P.C["Semua"].paid)?"naik":"turun"} ${pc(Math.abs(perDay(S0.paid)/PperDay(P.C["Semua"].paid)-1))} dari minggu lalu.`);
+  if(tP.ads&&TTc.roas!=null){const ch=perDay(TTc.ads)/PperDay(tP.ads)-1;if(ch<-0.2&&TTc.roas>=4.5)K.push(`<b>Belanja iklan TikTok turun ${pc(-ch)}</b> padahal ROAS masih ${f2(TTc.roas)} — GMV Max menahan belanja. Tambah video baru yang menjual dan naikkan budget bertahap 20%.`);
+    else if(TTc.be&&TTc.roas<TTc.be)K.push(`<b class="neg">ROAS TikTok ${f2(TTc.roas)} di bawah impas ${f2(TTc.be)}</b> — kurangi budget, keluarkan video rugi.`);
+    else if(TTc.roas>=4.5)K.push(`ROAS TikTok ${f2(TTc.roas)} sehat — ruang untuk menaikkan budget 20% per 3 hari selama ROAS ≥ 4,5.`);}
+  if(vWaste!=null&&vWaste>0.4)K.push(`<b>${pc(vWaste)} biaya video iklan masuk ke video rugi</b> — keluarkan video di daftar "Rugi" dari materi GMV Max.`);
+  if(W.isi1.tot)K.push(`Porsi pesanan isi 1: <b>${pc(W.isi1.one/W.isi1.tot)}</b>${W.isi1.one/W.isi1.tot>0.4?" — masih tinggi; dorong bundle isi 2–4 (laba per pesanan jauh lebih besar).":" — bagus, bundle sudah dominan."}`);
+  if(SPc.ads&&SPc.be&&SPc.roas<SPc.be)K.push(`<b class="neg">ROAS Shopee ${f2(SPc.roas)} di bawah impas ${f2(SPc.be)}</b> — cek iklan yang tidak menghasilkan (Iklan Produk Otomatis, Meta).`);
+  const ksm=`<div class="panel"><h3>Kesimpulan minggu ini</h3>${K.map(s=>`<div style="margin:4px 0">• ${s}</div>`).join("")||'<p class="hint">Belum cukup data.</p>'}</div>`;
+  return head+kp+ksm+tbl+vid;
+};
+document.addEventListener("click",e=>{const t=e.target.closest&&e.target.closest("[data-wk],[data-wkprint]");if(!t)return;
+  if(t.dataset.wkprint!==undefined){window.print();return;}
+  WK.start=addDays(WK.start||wkMon(today()),7*(+t.dataset.wk||0));render();});
 /* ---------- Piutang karyawan: kasbon/pinjaman karyawan dan pembayarannya (tunai/transfer atau potong gaji) ---------- */
 function empState(asOf="9999-12-31"){const E={};
   for(const x of S.emploans){if((x.date||"")>asOf||!x.emp)continue;const k=skey(x.emp),e=E[k]||={name:x.emp,loan:0,paid:0,plan:0,lastLoan:"",lastPay:"",n:0};e.n++;
