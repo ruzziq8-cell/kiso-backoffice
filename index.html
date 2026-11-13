@@ -574,9 +574,9 @@ function plCompare(m=M()){
   const used=new Set(ORD().filter(o=>(o.date||"").slice(0,7)===m&&counts(o)).map(o=>o.channel));
   const chans=[...MP,...CHANNELS.filter(c=>!MP.includes(c)&&used.has(c))],P=chans.map(c=>monthPL(m,c)),T=monthPL(m);
   const sum=f=>P.reduce((a,p)=>a+f(p),0),G=[...P.map(p=>p.gross),sum(p=>p.gross)];
-  const cell=(v,i,neg,cls="")=>{const g=G[i],x=neg?-v:v;return`<td class="n ${cls} ${x<0?"neg":""}">${Math.abs(v)<0.5?'<span class="mut">–</span>':rp(Math.round(x))}<small>${g&&Math.abs(v)>=0.5?pct(Math.abs(v),g):""}</small></td>`;};
-  const line=(label,f,{neg,cls="",sub}={})=>{const vs=[...P.map(f),sum(f)];if(sub&&vs.every(v=>Math.abs(v)<0.5))return"";return`<tr class="${cls}"><td class="${sub?"pc-sub":""}">${label}</td>${vs.map((v,i)=>cell(v,i,neg,i===vs.length-1?"pc-tot":"")).join("")}</tr>`;};
-  const only=(label,v,neg,cls="")=>Math.abs(v)<0.5&&!cls?"":`<tr class="${cls}"><td>${label}</td>${chans.map(()=>'<td class="n mut">·</td>').join("")}${cell(v,chans.length,neg,"pc-tot")}</tr>`;
+  const cell=(v,i,neg,cls="",sg)=>{const g=G[i],x=neg?-v:v;return`<td class="n ${cls} ${x<0?"neg":""}">${Math.abs(v)<0.5?'<span class="mut">–</span>':rp(Math.round(x))}<small>${g&&Math.abs(v)>=0.5?(sg&&x<0?"−":"")+pct(Math.abs(v),g):""}</small></td>`;};/* sg: result lines (laba, kontribusi) show a minus percent when negative */
+  const line=(label,f,{neg,cls="",sub}={})=>{const vs=[...P.map(f),sum(f)];if(sub&&vs.every(v=>Math.abs(v)<0.5))return"";return`<tr class="${cls}"><td class="${sub?"pc-sub":""}">${label}</td>${vs.map((v,i)=>cell(v,i,neg,i===vs.length-1?"pc-tot":"",/pc-t/.test(cls))).join("")}</tr>`;};
+  const only=(label,v,neg,cls="")=>Math.abs(v)<0.5&&!cls?"":`<tr class="${cls}"><td>${label}</td>${chans.map(()=>'<td class="n mut">·</td>').join("")}${cell(v,chans.length,neg,"pc-tot",/pc-t/.test(cls))}</tr>`;
   const fk=[...new Set(P.flatMap(p=>Object.keys(p.feeBy)))].sort((a,b)=>sum(p=>p.feeBy[b]||0)-sum(p=>p.feeBy[a]||0));
   const ik=[...new Set(P.flatMap(p=>Object.keys(p.incomeBy)))];
   const contrib=p=>p.net;/* a channel P&L has no shared costs, so its net = contribution after own ads */
