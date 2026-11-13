@@ -341,7 +341,9 @@ function derive(){
   for(const [i,v] of settle)if(!known.has(i))unknown.push({i,...v});
   const rate={};
   for(const ch of MP){let g=0,f=0;for(const o of imp)if(o.channel===ch&&counts(o)){const st=settle.get(o.ref);if(!st)continue;const gr=o.items.reduce((a,it)=>a+it.qty*it.price,0);if(gr>0&&Math.abs(gr-st.fee-st.settle)<1){g+=gr;f+=st.fee;}}rate[ch]=g>0?f/g:0.2;}
-  DER={all:[...S.orders,...imp],settle,unknown,adj,rate};
+  /* Rp0 orders (affiliate samples sent through the marketplace): average shipping actually deducted per settled sample */
+  const srate={};for(const ch of MP){let n=0,f=0;for(const o of imp)if(o.channel===ch&&counts(o)){const st=settle.get(o.ref);if(!st)continue;const gr=o.items.reduce((a,it)=>a+it.qty*it.price,0);const fe=st.fee-st.ads;if(!(gr>0)&&fe>0){n++;f+=fe;}}srate[ch]=n?f/n:0;}
+  DER={all:[...S.orders,...imp],settle,unknown,adj,rate,srate};
   return DER;
 }
 const ORD=()=>derive().all;
@@ -415,7 +417,7 @@ function orderTotals(o){
   if(o.imported){const D=derive(),st=D.settle.get(o.ref);
     if(st)return{gross,hpp,qty,fee:st.fee-st.ads,refund:gross-st.fee-st.settle,net:st.settle+st.ads,est:false,settled:true,sdate:st.date,fa:st.fa,comp:st.comp,ads:st.ads};
     if(o.status==="gagal")return{gross,hpp,qty,fee:0,refund:gross,net:0,est:false,settled:false};/* failed delivery: the platform will not pay, so no receivable */
-    const fee=Math.round(gross*(D.rate[o.channel]??0.2));return{gross,hpp,qty,fee,refund:0,net:gross-fee,est:true,settled:false};}
+    const fee=gross>0?Math.round(gross*(D.rate[o.channel]??0.2)):Math.round(D.srate?.[o.channel]||0);return{gross,hpp,qty,fee,refund:0,net:gross-fee,est:true,settled:false,sampleEst:!(gross>0)};}
   return{gross,hpp,qty,fee:+o.fee||0,refund:0,net:gross-(+o.fee||0),est:false};
 }
 const sretTotal=r=>(r.items||[]).reduce((a,it)=>a+(+it.qty||0)*(+it.cost||0),0);
@@ -499,7 +501,7 @@ function monthPL(m=M(),ch=null){
   for(const o of orders){const t=orderTotals(o);gross+=t.gross;fee+=t.fee;refund+=t.refund||0;if(t.est)est+=t.fee;hpp+=t.hpp;units+=t.qty;
     if(t.comp){let cs=0;for(const [k,v] of Object.entries(t.comp)){if(/GMV Max|Isi Saldo Otomatis/i.test(k))continue;addFee(feeGroup(k),v);cs+=v;}addFee("Biaya lain (selisih rincian)",t.fee-cs);}
     else if(t.settled)addFee(`Potongan ${o.channel} (tanpa rincian)`,t.fee);
-    else if(t.est)addFee("Estimasi potongan pesanan belum cair",t.fee);
+    else if(t.est)addFee(t.sampleEst?"Estimasi ongkir sampel affiliate belum cair":"Estimasi potongan pesanan belum cair",t.fee);
     else addFee(`Potongan diisi manual (${o.channel})`,t.fee);
     const d=+o.date.slice(8,10);perDay[d]=(perDay[d]||0)+t.gross;perCh[o.channel]=(perCh[o.channel]||0)+t.gross;const pd=perDayDet[d]||={n:0,ch:{}};pd.n++;pd.ch[o.channel]=(pd.ch[o.channel]||0)+t.gross;
     for(const it of o.items||[]){const g=(+it.qty||0)*(+it.price||0),share=t.gross?t.fee*g/t.gross:0;const r=perProd[it.productId]||={qty:0,rev:0,hpp:0,fee:0};r.qty+=+it.qty||0;r.rev+=g;r.hpp+=(+it.qty||0)*(+it.hpp||hppOf(it.productId));r.fee+=share+(t.gross?(t.refund||0)*g/t.gross:0);}}
@@ -546,8 +548,8 @@ function feeGroup(k){
 }
 function plHtml(pl,detail){
   const ob=Object.entries(pl.opexBy).sort((a,b)=>b[1]-a[1]),G=pl.gross;
-  const p=v=>`<span class="plp">${G?(v/G*100).toFixed(1).replace(".",",")+"%":""}</span>`;
-  const row=(cls,label,v,neg,extra="")=>`<div class="${cls}"><span>${label}</span>${p(Math.abs(v))}<span class="${neg?"neg":v<0?"neg":cls==="big"?"pos":""}">${rp0(neg?-v:v)}</span></div>${extra}`;
+  const p=v=>`<span class="plp">${G?(v<0?"−":"")+(Math.abs(v)/G*100).toFixed(1).replace(".",",")+"%":""}</span>`;
+  const row=(cls,label,v,neg,extra="")=>`<div class="${cls}"><span>${label}</span>${p(cls==="big"?v:Math.abs(v))}<span class="${neg?"neg":v<0?"neg":cls==="big"?"pos":""}">${rp0(neg?-v:v)}</span></div>${extra}`;
   const fb=Object.entries(pl.feeBy||{}).filter(([,v])=>Math.abs(v)>=0.5).sort((a,b)=>b[1]-a[1]);
   return`<div class="pl pl3">
   <div class="plh"><span></span><span class="plp">% omzet</span><span></span></div>
@@ -1241,8 +1243,9 @@ function calcGroup(k){const g=feeGroup(k);
 }
 function calcRange(){const t=today();if(CALC.period==="bulan")return[M()+"-01",endOf(M())<t?endOf(M()):t];return[addDays(t,-(+CALC.period||30)),t];}
 /* real fee rates per channel from settled orders in the period (orders mostly refunded are left out) */
-function calcRates(ch){const [a,b]=calcRange(),C={};let n=0,G=0;
+function calcRates(ch){const [a,b]=calcRange(),C={};let n=0,G=0,sN=0,sF=0;
   for(const o of ORD()){if(o.channel!==ch||!o.imported||(o.date||"")<a||(o.date||"")>b)continue;const t=orderTotals(o);
+    if(t.settled&&!(t.gross>0)&&o.status!=="batal"){if(t.fee>0){sN++;sF+=t.fee;}continue;}/* Rp0 orders (affiliate samples via the marketplace): their shipping is spread over paid orders */
     if(!t.settled||!t.comp||!(t.gross>0)||t.refund>t.gross*0.5)continue;n++;G+=t.gross;const seen={};
     for(const [k,v] of Object.entries(t.comp)){if(!v||/GMV Max|Isi Saldo Otomatis/i.test(k))continue;const g=calcGroup(k);if(!g)continue;
       const c=C[g.key]||={...g,s:0,n:0,g:0};c.s+=v;if(!seen[g.key]){seen[g.key]=1;c.n++;c.g+=t.gross;}}}
@@ -1250,7 +1253,8 @@ function calcRates(ch){const [a,b]=calcRange(),C={};let n=0,G=0;
     .sort((x,y)=>({platform:0,program:1,ongkir:2}[x.grp]-{platform:0,program:1,ongkir:2}[y.grp])||Math.abs(y.s)-Math.abs(x.s));
   /* Promo XTRA+ (Shopee, official rate, all categories incl. kecantikan): 6.5% of price after seller discount/voucher, max Rp80.000 per product quantity; replaces the Promo XTRA fee */
   if(ch===SP)rows.splice(rows.findIndex(r=>r.grp==="ongkir")<0?rows.length:rows.findIndex(r=>r.grp==="ongkir"),0,{key:"promoxtraplus",label:"Promo XTRA+ (menggantikan Promo XTRA)",kind:"pct",grp:"program",rate:0.065,cap:80000,part:0,official:true,s:0,n:0,g:0});
-  return{ch,n,G,avg:n?G/n:0,rows,from:a,to:b};}
+  if(sF>0){const r={key:"sampel",label:`Ongkir sampel affiliate (${num(sN)} sampel Rp0, dibagi ke pesanan berbayar)`,kind:"order",grp:"program",s:sF,n:sN,g:0,part:1,per:n?sF/n:0,rate:0};const io=rows.findIndex(x=>x.grp==="ongkir");rows.splice(io<0?rows.length:io,0,r);}
+  return{ch,n,G,avg:n?G/n:0,rows,from:a,to:b,sN,sF};}
 const calcOn=(ch,r)=>{const k=ch+"|"+r.key;return r.grp!=="program"?true:k in CALC.on?!!CALC.on[k]:r.part>=0.5;};
 /* actual average selling price and order count of a product per channel in the period */
 function calcActual(pid,ch){const [a,b]=calcRange();let q=0,v=0,n=0;
