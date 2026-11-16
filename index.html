@@ -168,9 +168,8 @@ dialog form{display:grid;gap:14px;padding:18px}
     </div>
     <nav role="tablist" id="tabs">
       <button role="tab" data-tab="dash">Dashboard</button>
-      <button role="tab" data-tab="daily">Laporan Harian</button>
-      <button role="tab" data-tab="weekly">Ringkasan Mingguan</button>
-      <button role="tab" data-tab="perf">Analisa Kinerja</button>
+      <button role="tab" data-tab="lapTT">Laporan TikTok</button>
+      <button role="tab" data-tab="lapSP">Laporan Shopee</button>
       <button role="tab" data-tab="cust">Pelanggan</button>
       <button role="tab" data-tab="sales">Penjualan</button>
       <button role="tab" data-tab="buy">Pembelian</button>
@@ -182,8 +181,6 @@ dialog form{display:grid;gap:14px;padding:18px}
       <button role="tab" data-tab="bank">Bank & Kas</button>
       <button role="tab" data-tab="ar">Piutang</button>
       <button role="tab" data-tab="emp">Piutang Karyawan</button>
-      <button role="tab" data-tab="ads">Iklan & Analitik</button>
-      <button role="tab" data-tab="video">Analisa Video</button>
       <button role="tab" data-tab="report">Laporan</button>
       <button role="tab" data-tab="set">Pengaturan</button>
     </nav>
@@ -281,6 +278,7 @@ const S={settings:{storeName:"KISO.ID"},loaded:{},db:null,canWrite:true,team:[],
 COLLS.forEach(c=>S[c]=[]);
 let tab="dash",dailyCh="Semua",dailyDay="",skuSort="profit",salesFilter="Semua",bankAcc=null,salesLimit=300,adsCh="Ringkasan";
 try{tab=localStorage.getItem("kiso.tab")||"dash";}catch(e){}
+if(["daily","weekly","perf","ads","video"].includes(tab))tab="lapTT";/* old tabs merged into Laporan TikTok / Laporan Shopee */
 const today=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);};
 const monthSel=document.getElementById("monthSel");
 /* theme: Otomatis (ikut perangkat) → Gelap → Terang; remembered per browser */
@@ -294,7 +292,7 @@ document.getElementById("themeBtn")?.addEventListener("click",()=>{const i=THEME
    Write protection for view-only accounts is enforced by claude.ai; module hiding for editors is a display rule. ---------- */
 const ROLES={
   ceo:{name:"CEO",tabs:"*",write:true,desc:"Melihat dan mengubah semua modul, termasuk Kalkulator Laba (khusus CEO)"},
-  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","daily","weekly","perf","cust","stock","sales","buy","ap","price","cost","bank","ar","emp","ads","video","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan Harian, Analisa Kinerja, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Iklan, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
+  admin:{name:"Admin keuangan",viewOnly:["stock"],tabs:["dash","lapTT","lapSP","cust","stock","sales","buy","ap","price","cost","bank","ar","emp","report","set"],write:true,desc:"Melihat dan mengubah modul keuangan dan Pengaturan (Dashboard, Laporan TikTok, Laporan Shopee, Pelanggan, Penjualan, Pembelian, Hutang, Harga & Margin, Beban & Aset, Bank & Kas, Piutang, Laporan), dan melihat modul Stok tanpa bisa mengubah"},
   gudang:{name:"Gudang",tabs:["stock"],write:true,desc:"Hanya modul Stok (melihat dan mengubah)"},
   pemilik:{name:"Pemilik",tabs:"*",write:false,desc:"Melihat semua modul (kecuali Kalkulator Laba), tidak bisa mengubah apa pun"},
 };
@@ -633,10 +631,10 @@ addEventListener("scroll",()=>{if(tipOn)hideTip();},{passive:true});
 
 /* ---------- views ---------- */
 const V={};
-V.daily=()=>{
+function dailyView(dailyCh,opt={}){
   const m=M(),D=dailyStats(m,dailyCh),T0=today(),rows=D.filter(x=>(x.n||x.ads)&&x.date<=T0);
   const chips=`<div class="chips">${["Semua","TikTok Shop","Shopee"].map(c=>`<button data-dailych="${c}" aria-pressed="${c===dailyCh}">${c==="Semua"?"Semua channel":c}</button>`).join("")}</div>`;
-  const head=`<div class="row"><h2>Laporan penjualan harian ${esc(mname(m))}</h2></div>${chips}`;
+  const head=opt.embed?`<div class="row"><h2>Laba rugi & indikator harian ${esc(mname(m))}</h2></div>`:`<div class="row"><h2>Laporan penjualan harian ${esc(mname(m))}</h2></div>${chips}`;
   if(!rows.length)return head+emptyBox(`Belum ada penjualan ${esc(mname(m))}`,"Impor file pesanan marketplace atau catat pesanan manual.");
   const T=rows.reduce((a,x)=>{for(const k of ["n","gross","fee","refund","hpp","ads","adsGmv","adsOrders","impr","clicks","cm","profit"])a[k]=(a[k]||0)+x[k];return a;},{});
   T.roas=T.ads?T.adsGmv/T.ads:null;T.be=T.cm>0?T.gross/T.cm:null;T.cpo=T.adsOrders?T.ads/T.adsOrders:null;T.roi=T.ads?T.profit/T.ads:null;T.aov=T.n?T.gross/T.n:null;T.acos=T.adsGmv?T.ads/T.adsGmv:null;{const cr=rows.filter(x=>x.ctr!=null),ci=cr.reduce((a,x)=>a+x.impr,0);T.ctr=ci?cr.reduce((a,x)=>a+x.clicks,0)/ci:null;}T.tacos=T.gross?T.ads/T.gross:null;
@@ -701,7 +699,8 @@ V.daily=()=>{
       <div><span><b>CTR iklan</b></span><span>klik ÷ tayangan iklan. TikTok dari file Creative data yang diekspor per 1 hari; Shopee dari laporan iklan dibagi rata per hari. Kosong jika data salah satu channel belum lengkap</span></div>
     </div>
     <p class="hint">Biaya iklan TikTok per hari dari file Campaign overview; Shopee dari laporan iklan per periode yang dibagi rata per hari, jadi angka harian Shopee adalah perkiraan.</p></div>`;
-};
+}
+V.daily=(opt={})=>dailyView(opt.ch||dailyCh,opt);
 V.dash=()=>{
   const pl=monthPL(),pm=pmap(),s=stockOf(),low=lowItems(s);
   const days=lastDay(M()),avgDay=Math.round(pl.gross/Math.max(1,Object.keys(pl.perDay).length));
@@ -741,7 +740,7 @@ V.dash=()=>{
       ${top.length?`<div class="tbl"><table><thead><tr><th>Produk</th><th class="n">Terjual</th><th class="n">Omzet</th><th class="n">Margin</th><th class="n">%</th></tr></thead><tbody>
       ${top.map(([id,r])=>{const m=r.rev-r.hpp-r.fee;return`<tr><td>${esc(pname(id,pm))}</td><td class="n">${num(r.qty)}</td><td class="n">${rp(r.rev)}</td><td class="n ${m<0?"neg":""}">${rp(m)}</td><td class="n">${pct(m,r.rev)}</td></tr>`}).join("")}</tbody></table></div>
       <p class="hint">Margin = omzet − HPP − potongan marketplace (dibagi proporsional). Belum termasuk iklan.</p>`
-      :`<div class="empty"><b>Belum ada penjualan di periode ini</b>Catat pesanan di tab Penjualan.</div>`}</div>
+      :`<div class="empty"><b>Belum ada penjualan di periode ini</b>Catat pesanan di tab Penjualan atau impor file di Laporan TikTok / Laporan Shopee.</div>`}</div>
     <div class="panel"><div class="row"><h3>Stok menipis</h3><div class="sp"></div><span class="pill ${low.length?"warn":"good"}">${low.length} item</span></div>
       ${low.length?`<div class="tbl"><table><thead><tr><th>Item</th><th class="n">Sisa</th><th class="n">Min.</th></tr></thead><tbody>${low.map(x=>`<tr><td>${esc(x.name)}</td><td class="n ${x.left<=0?"neg":""}">${num(x.left)} ${esc(x.unit)}</td><td class="n">${num(x.min)}</td></tr>`).join("")}</tbody></table></div>`
       :`<div class="empty"><b>Semua stok aman</b>Batas minimum diatur per produk dan bahan di tab Stok.</div>`}</div>
@@ -760,7 +759,7 @@ V.sales=()=>{
     const attrs=o.imported?`title="Diimpor dari file ${esc(o.channel)}${o.src?" · sumber "+esc(o.src):""}"`:`class="click" data-edit="order" data-id="${o.id}"`;
     return`<tr ${attrs}><td>${fdate(o.date)}${o.time?`<div class="hint">${esc(o.time)}</div>`:""}</td><td>${esc(o.channel)}${o.imported?' <span class="pill acc">Impor</span>':""}${o.kilat?' <span class="pill warn" title="Pengiriman diatur ±15 menit setelah bayar (agen SPX)${manualStock(o)?"":kilatSkip(o)?": tidak mengurangi stok gudang":": masih mengurangi stok (aturan kilat nonaktif untuk tanggal ini)"}">Kilat · agen SPX</span>':""}</td><td>${esc(o.ref||"–")}</td><td class="wrapcell">${(o.items||[]).map(it=>`${esc(pname(it.productId,pm))} ×${num(+it.qty)}`).join(", ")}</td><td><span class="pill ${st[1]}">${st[0]}</span>${isSample(o)?` <span class="pill acc">${SAMPLE_T[o.sample]||"Sampel (Rp0)"}</span>`:""}</td><td>${pay}</td><td class="n">${isSample(o)?'<span class="mut">bukan omzet</span>':rp(t.gross)}</td><td class="n mut">${t.est?"≈ ":""}${rp(t.fee)}${t.refund?`<div class="hint">retur ${rp(t.refund)}</div>`:""}</td><td class="n">${rp(t.net)}</td></tr>`}).join("");
   const est=derive().rate;
-  return`<div class="row"><h2>Penjualan</h2><div class="sp"></div>${S.canWrite?`<button class="btn" data-import>Impor file marketplace</button>`:""}${btn("order","+ Pesanan manual",1)}</div>
+  return`<div class="row"><h2>Penjualan</h2><div class="sp"></div>${btn("order","+ Pesanan manual",1)}</div>
   <div class="chips">${["Semua",...CHANNELS].map(c=>`<button data-chan="${c}" aria-pressed="${c===salesFilter}">${c}</button>`).join("")}</div>
   ${rows.length?`<div class="tbl"><table><thead><tr><th>Tanggal</th><th>Channel</th><th>No. pesanan</th><th>Produk</th><th>Status</th><th>Pembayaran</th><th class="n">Kotor</th><th class="n">Potongan</th><th class="n">Bersih</th></tr></thead><tbody>${body}</tbody>
   <tfoot><tr><td colspan="6">${num(nc)} pesanan dihitung · ${num(tq)} pcs${nb?` · ${num(nb)} batal / belum dibayar tidak dihitung`:""}</td><td class="n">${rp(tg)}</td><td class="n">${rp(tf+tr)}</td><td class="n">${rp(tn)}</td></tr></tfoot></table></div>
@@ -843,12 +842,12 @@ V.stock=()=>{
     if(x._k==="sret")return[`Retur ke supplier · ${esc(x.supplier||"")}`,(x.items||[]).map(it=>`${esc(matName(it.materialId))} −${num(+it.qty)}`).join(", ")];
     if(x._k==="prod"){if(x.type==="buka")return[`Buka karton`,`${num(x.qty)} karton → +${num(x.qty*(+x.perUnit||s.perK))} piece sabun`];
       const p=pm[x.productId];return[`Packing ${esc(pname(x.productId,pm))}`,`+${num(x.qty)} pack · −${num(x.qty*(+p?.pcs||0))} piece · −${num(x.qty)} bubble mailer`];}
-    if(x.type==="kirim"){const sb=(x.items||[]).reduce((a,it)=>a+(+it.qty||0)*(+pm[it.productId]?.pcs||0),0);return[`Barang keluar · ${esc(x.channel||"")}${+x.resi?` · ${num(x.resi)} resi`:""}`,(x.items||[]).map(it=>`${esc(pname(it.productId,pm))} −${num(+it.qty)}`).join(", ")+` <span class="mut">(${num(sb)} sabun)</span>`];}
+    if(x.type==="kirim"){const sb=(x.items||[]).reduce((a,it)=>a+(+it.qty||0)*(+pm[it.productId]?.pcs||0),0);return[`Barang keluar · ${esc(x.channel||"")}${isSmpMove(x)?` · ${esc(SMP_T[x.sampleType]||"belum dipilah")}${x.samplePlat?" · "+esc(x.samplePlat):""}`:""}${+x.resi?` · ${num(x.resi)} resi`:""}`,(x.items||[]).map(it=>`${esc(pname(it.productId,pm))} −${num(+it.qty)}`).join(", ")+` <span class="mut">(${num(sb)} sabun)</span>`];}
     const[t,id]=(x.target||"").split(":"),nm=t==="p"?pname(id,pm):matName(id),q=+x.qty||0,d=x.type==="keluar"?-q:q;
     return[`Penyesuaian · ${esc(ADJ_T[x.type]||x.type)}`,`${esc(nm)} ${d>0?"+":""}${num(d)}`];
   };
   const sf=S.settings.stockFrom;
-  return`<div class="row"><h2>Stok</h2><div class="sp"></div>${btn("opname","Stock opname")}${btn("cret","Retur dari pembeli")}${btn("buka","Buka karton")}${btn("packing","Packing isi 1–4")}${btn("kirim","− Barang keluar",1)}</div>
+  return`<div class="row"><h2>Stok</h2><div class="sp"></div>${btn("opname","Stock opname")}${btn("cret","Retur dari pembeli")}${btn("buka","Buka karton")}${btn("packing","Packing isi 1–4")}${btn("kirim","− Barang keluar",1)}</div>${smpStockPanel()}
   ${sf?`<p class="hint">Mulai ${fdate(sf)}, stok berkurang hanya dari <b>Barang keluar</b> yang dicatat gudang (sesuai resi yang dicetak). Pesanan Shopee, TikTok, dan offline tidak mengurangi stok.</p>`:""}
   <div class="accts">
     <div class="acct recv hero"><span>Total sabun batang Kiso</span><b>${num(s.soap)} pcs</b><span>Karton + piece lepas + isi dalam pack</span></div>
@@ -979,14 +978,14 @@ function perfFindings(P,mode,day){
   if(!P.C){const R=receivables(endOf(P.m)),ar=MP.reduce((a,c)=>a+recvTotal(R,c),0);if(ar>g*0.3)add("info","Piutang marketplace besar",`Dana belum cair ${rp0(ar)} (${pc(ar/g)} dari omzet bulan ini).`,["Pantau pencairan rutin dan impor file income tiap hari","Rencanakan pembelian stok dari dana yang sudah cair saja"],"30");}
   return F;
 }
-let perfMode="bulan",perfCh="Semua",perfDay="";
-V.perf=()=>{
+const PERF={mode:"bulan",ch:"Semua",day:""};
+V.perf=(opt={})=>{let perfMode=opt.mode||PERF.mode,perfCh=opt.ch||PERF.ch,perfDay=opt.day!=null?opt.day:PERF.day;
   const m=M(),P=perfData(m,perfCh),pc=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
-  const days=P.D.filter(x=>x.n&&x.date<=today()).map(x=>x.date);if(!days.includes(perfDay))perfDay=days[days.length-1]||"";
+  const days=P.D.filter(x=>x.n&&x.date<=today()).map(x=>x.date);if(!opt.embed&&!days.includes(perfDay))perfDay=days[days.length-1]||"";
   const chips=`<div class="chips">${[["bulan","Bulanan"],["hari","Harian"]].map(([k,l])=>`<button data-perfmode="${k}" aria-pressed="${perfMode===k}">${l}</button>`).join("")}</div>
   <div class="chips">${["Semua",TT,SP].map(c=>`<button data-perfch="${c}" aria-pressed="${perfCh===c}">${c==="Semua"?"Semua channel":c}</button>`).join("")}
   ${perfMode==="hari"?`<label class="hint" style="display:flex;gap:6px;align-items:center;margin-left:8px">Tanggal <select id="perfDay">${days.map(d=>`<option value="${d}" ${d===perfDay?"selected":""}>${fdate(d)}</option>`).join("")}</select></label>`:""}</div>`;
-  const head=`<div class="row"><h2>Analisa kinerja · ${perfMode==="hari"&&perfDay?fdate(perfDay):esc(mname(m))}</h2></div>${chips}`;
+  const head=opt.embed?"":`<div class="row"><h2>Analisa kinerja · ${perfMode==="hari"&&perfDay?fdate(perfDay):esc(mname(m))}</h2></div>${chips}`;
   if(!P.g)return head+emptyBox(`Belum ada penjualan ${esc(mname(m))}`,"Impor file pesanan marketplace dulu.");
   const kpi=(l,v,s,cls="")=>`<div class="kpi"><span>${l}</span><b class="${cls}">${v}</b><span>${s}</span></div>`;
   const lvlPill={bad:'<span class="pill bad">Perlu tindakan</span>',warn:'<span class="pill warn">Perhatikan</span>',good:'<span class="pill good">Baik</span>',info:'<span class="pill">Info</span>'};
@@ -1026,7 +1025,7 @@ V.perf=()=>{
           .map(([l,r,v,b])=>`<tr${b?' style="font-weight:700"':""}><td>${l}</td><td class="n ${r<0?"neg":""}">${r<0?"−":""}Rp${Math.abs(r*100).toFixed(1).replace(".",",")}</td><td class="n ${v<0?"neg":""}">${rp0(v)}</td></tr>`).join("")}
       </tbody></table></div>
       <p class="hint">Iklan: ROAS ${f2(P.roas)} (impas ${f2(P.beRoas)}), ACOS ${pc(P.A.adsGmv?P.A.ads/P.A.adsGmv:null)}, biaya per pesanan iklan ${P.A.adsOrders?rp0(P.A.ads/P.A.adsOrders):"–"}, CTR ${pc(P.A.ctr)}. Pesanan batal ${pc(P.all?P.canc/P.all:null)}.</p></div>
-      ${P.C?`<div class="panel"><h3>Ringkasan ${esc(P.C)}</h3><p class="hint">Beban tetap dihitung di tampilan Semua channel.</p></div>`:`<div class="panel"><h3>Per channel</h3><div class="tbl"><table><thead><tr><th></th>${[TT,SP].map(c=>`<th class="n">${c}</th>`).join("")}</tr></thead><tbody>
+      ${P.C?`<div class="panel"><h3>Ringkasan ${esc(P.C)}</h3><p class="hint">Beban tetap perusahaan ada di Dashboard → Analisa kinerja semua channel.</p></div>`:`<div class="panel"><h3>Per channel</h3><div class="tbl"><table><thead><tr><th></th>${[TT,SP].map(c=>`<th class="n">${c}</th>`).join("")}</tr></thead><tbody>
         ${(()=>{const X=[TT,SP].map(c=>perfData(m,c));const r=(l,f)=>`<tr><td>${l}</td>${X.map(q=>`<td class="n">${f(q)}</td>`).join("")}</tr>`;
           return r("Omzet",q=>rp0(q.g))+r("Porsi omzet",q=>pc(P.g?q.g/P.g:null))+r("Pesanan · AOV",q=>`${num(q.pl.count)} · ${q.aov?rp0(q.aov):"–"}`)+r("Potongan marketplace",q=>pc(q.feeR))+r("Biaya iklan",q=>rp0(q.adsAll))+r("ROAS / impas",q=>q.roas?`${roasPill(q.roas,q.beRoas)} / ${f2(q.beRoas)}`:"–")+r("TACOS",q=>pc(q.tacos))+r("Laba setelah iklan",q=>`<span class="${q.var_<0?"neg":""}">${rp0(q.var_)}</span>`)+r("Margin setelah iklan",q=>pc(q.vr));})()}
       </tbody></table></div></div>`}
@@ -1035,7 +1034,7 @@ V.perf=()=>{
   /* SKU table */
   const from=perfMode==="hari"?perfDay:m+"-01",to=perfMode==="hari"?perfDay:endOf(m);
   const K=skuStats(m,perfCh,from,to).filter(r=>r.gross>0).sort((a,b)=>b.profit-a.profit);
-  body+=`<div class="panel"><h3>Kinerja per SKU</h3>${K.length?`<div class="tbl"><table><thead><tr><th>SKU</th><th class="n">Pcs</th><th class="n">Omzet</th><th class="n">Iklan (est.)</th><th class="n">ROAS / impas</th><th class="n">Laba setelah iklan</th><th class="n">Margin</th><th class="n">Laba / pesanan</th></tr></thead><tbody>
+  if(!opt.embed)body+=`<div class="panel"><h3>Kinerja per SKU</h3>${K.length?`<div class="tbl"><table><thead><tr><th>SKU</th><th class="n">Pcs</th><th class="n">Omzet</th><th class="n">Iklan (est.)</th><th class="n">ROAS / impas</th><th class="n">Laba setelah iklan</th><th class="n">Margin</th><th class="n">Laba / pesanan</th></tr></thead><tbody>
     ${K.map(r=>`<tr><td>${esc(r.name)}</td><td class="n">${num(r.units)}</td><td class="n">${rp0(r.gross)}</td><td class="n mut">${rp0(r.ads)}</td><td class="n">${r.roas?roasPill(r.roas,r.be):"–"} <span class="mut">/ ${f2(r.be)}</span></td><td class="n ${r.profit<0?"neg":""}">${rp0(r.profit)}</td><td class="n">${pc(r.gross?r.profit/r.gross:null)}</td><td class="n">${r.n?rp0(r.profit/r.n):"–"}</td></tr>`).join("")}
   </tbody></table></div><p class="hint">Biaya iklan per SKU adalah perkiraan: kampanye bernama "Isi N" dibebankan ke SKU itu, sisanya dibagi menurut porsi penjualan.</p>`:'<p class="hint">Belum ada penjualan.</p>'}</div>`;
   /* indicator guide */
@@ -1044,7 +1043,7 @@ V.perf=()=>{
    body+=perfGlossary({roas:src.roas,be:src.be,roi:src.roi,acos:src.adsGmv?src.ads/src.adsGmv:null,acosBe:src.acosBe,tacos:src.tacos,ctr:day?(ok?src.ctr:null):P.A.ctr,cpc:day?(ok&&src.clicks?src.ads/src.clicks:null):P.A.cpc,cvr:day?(ok&&src.clicks?src.adsOrders/src.clicks:null):P.A.cvr});}
   /* conclusions */
   const Fd=perfFindings(P,perfMode,perfDay),order={bad:0,warn:1,good:2,info:3};Fd.sort((a,b)=>order[a.lvl]-order[b.lvl]);
-  body+=`<div class="panel"><h3>Kesimpulan & yang harus dilakukan</h3>${Fd.length?Fd.map(f=>`<div style="padding:10px 0;border-top:1px solid var(--line)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${lvlPill[f.lvl]}<b>${esc(f.title)}</b></div><p style="margin:6px 0">${f.text}</p>${f.acts.length?`<ul style="margin:4px 0 0 18px;padding:0">${f.acts.map(a=>`<li>${a}</li>`).join("")}</ul>`:""}</div>`).join(""):'<p class="hint">Belum cukup data untuk kesimpulan.</p>'}</div>`;
+  const KES=`<div class="panel"><h3>Kesimpulan & yang harus dilakukan</h3>${Fd.length?Fd.map(f=>`<div style="padding:10px 0;border-top:1px solid var(--line)"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${lvlPill[f.lvl]}<b>${esc(f.title)}</b></div><p style="margin:6px 0">${f.text}</p>${f.acts.length?`<ul style="margin:4px 0 0 18px;padding:0">${f.acts.map(a=>`<li>${a}</li>`).join("")}</ul>`:""}</div>`).join(""):'<p class="hint">Belum cukup data untuk kesimpulan.</p>'}</div>`;body=opt.embed?KES+body:body+KES;
   /* customers */
   let CR=null;
   if(perfMode==="bulan"&&CUST_OK()&&S.customers.length){const X=custStats(m,perfCh);if(X.inM.length){CR=custReport(m,perfCh,X);
@@ -1350,8 +1349,8 @@ function videoTable(){const rep=videoRep();if(!rep)return"";const be=videoBe(rep
   </tbody></table></div>`;}
 V.video=()=>{
   const rep=videoRep(),head=`<div class="row"><h2>Analisa video iklan</h2></div>
-  <p class="hint">Dari file TikTok <b>Creatives video data</b> (per video: biaya iklan, penjualan, pesanan, klik, konversi, dan seberapa banyak penonton bertahan 2 dan 6 detik). Impor filenya lewat tombol Impor di tab Penjualan. Data ini untuk analisa saja, tidak mengubah laba rugi.</p>`;
-  if(!rep)return head+emptyBox("Belum ada data video","Unduh file Creatives video data dari TikTok Ads (GMV Max → Materi iklan), lalu impor lewat tab Penjualan.");
+  <p class="hint">Dari file TikTok <b>Creatives video data</b> (per video: biaya iklan, penjualan, pesanan, klik, konversi, dan seberapa banyak penonton bertahan 2 dan 6 detik). Impor filenya lewat tombol Impor di Laporan TikTok. Data ini untuk analisa saja, tidak mengubah laba rugi.</p>`;
+  if(!rep)return head+emptyBox("Belum ada data video","Unduh file Creatives video data dari TikTok Ads (GMV Max → Materi iklan), lalu impor lewat tombol Impor di Laporan TikTok.");
   const R=rep.rows||[],be=videoBe(rep),paid=R.filter(x=>x.spend>0),sum=(a,f)=>a.reduce((s,x)=>s+(+x[f]||0),0);
   const sp=sum(paid,"spend"),gm=sum(paid,"gmv"),od=sum(paid,"orders"),p=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
   const bands=[["rugi",`ROAS di bawah ${f2(be)} (rugi)`],["tipis",`ROAS ${f2(be)}–4 (untung tipis)`],["untung","ROAS 4 ke atas (untung)"]].map(([k,l])=>{const a=paid.filter(x=>videoBand(x,be)===k);return{k,l,n:a.length,sp:sum(a,"spend"),gm:sum(a,"gmv"),od:sum(a,"orders")};});
@@ -1440,7 +1439,7 @@ V.weekly=()=>{
   if(vr){const be=videoBe(vr),R=(vr.rows||[]).filter(x=>x.spend>0),sp=R.reduce((s,x)=>s+x.spend,0),rug=R.filter(x=>x.gmv/x.spend<be),rs=rug.reduce((s,x)=>s+x.spend,0);vWaste=sp?rs/sp:null;
     const win=R.filter(x=>x.spend>=10000&&x.gmv/x.spend>=4).sort((x,y)=>y.gmv-x.gmv).slice(0,5),lose=rug.filter(x=>x.spend>=20000).sort((x,y)=>y.spend-x.spend).slice(0,5);
     const li=(L,e)=>L.length?`<div class="tbl"><table><thead><tr><th>Video</th><th>Akun</th><th class="n">Biaya</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Konversi</th></tr></thead><tbody>${L.map(x=>`<tr><td class="wrapcell">${esc((x.title||"(tanpa judul)").slice(0,70))}</td><td>@${esc(x.acct)}</td><td class="n">${rp0(x.spend)}</td><td class="n">${rp0(x.gmv)}</td><td class="n">${f2(x.gmv/x.spend)}</td><td class="n">${pc(x.cvr)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="hint">${e}</p>`;
-    vid=`<div class="panel"><h3>Video iklan TikTok</h3><p class="hint">Dari file video ${fdate(vr.from)} – ${fdate(vr.to)}: biaya video ${rp0(sp)}, ROAS ${sp?f2(R.reduce((s,x)=>s+x.gmv,0)/sp):"–"}, <b class="${vWaste>0.4?"neg":""}">${pc(vWaste)} biaya masuk ke video rugi</b> (ROAS di bawah ${f2(be)}). Detail lengkap di tab Analisa Video.</p>
+    vid=`<div class="panel"><h3>Video iklan TikTok</h3><p class="hint">Dari file video ${fdate(vr.from)} – ${fdate(vr.to)}: biaya video ${rp0(sp)}, ROAS ${sp?f2(R.reduce((s,x)=>s+x.gmv,0)/sp):"–"}, <b class="${vWaste>0.4?"neg":""}">${pc(vWaste)} biaya masuk ke video rugi</b> (ROAS di bawah ${f2(be)}). Detail lengkap di Laporan TikTok → Bulanan → Video.</p>
     <div class="grid2"><div><h3>Pemenang (ROAS ≥ 4)</h3>${li(win,"Belum ada video pemenang dengan biaya cukup.")}</div><div><h3>Rugi — keluarkan dari iklan</h3>${li(lose,"Tidak ada video rugi dengan biaya besar.")}</div></div></div>`;}
   /* automatic conclusions */
   const K=[],tP=P.C[TT];
@@ -1458,6 +1457,157 @@ V.weekly=()=>{
 document.addEventListener("click",e=>{const t=e.target.closest&&e.target.closest("[data-wk],[data-wkprint]");if(!t)return;
   if(t.dataset.wkprint!==undefined){window.print();return;}
   WK.start=addDays(WK.start||wkMon(today()),7*(+t.dataset.wk||0));render();});
+/* ---------- Laporan per platform (TikTok Shop / Shopee): Harian · Mingguan · Bulanan, impor sendiri. Read-only views built from the same numbers as Dashboard ---------- */
+const LAP={mode:{},day:{},wk:{}};try{const o=JSON.parse(localStorage.getItem("kiso.lap")||"{}");for(const k of ["mode","day","wk"])Object.assign(LAP[k],o[k]||{});}catch(_){}
+const lapSave=()=>{try{localStorage.setItem("kiso.lap",JSON.stringify(LAP));}catch(_){}};
+const lapNextM=m=>{const d=new Date(+m.slice(0,4),+m.slice(5,7),1);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;};
+/* an embedded module: its page title becomes a section title and its own import button is dropped (import lives in the report header) */
+const lapEmbed=h=>String(h||"").replace(/<h2>/g,"<h3>").replace(/<\/h2>/g,"</h3>").replace(/<button class="btn[^"]*" data-import[^>]*>[^<]*<\/button>/g,"");
+const lapNoKpi=h=>String(h||"").replace(/<div class="kpis">(?:\s*<div class="kpi"><span>[\s\S]*?<\/span><\/div>)+\s*<\/div>/,"");
+const lapPc=v=>v==null||!isFinite(v)?"–":(v<0?"−":"")+(Math.abs(v)*100).toFixed(1).replace(".",",")+"%";
+const SMP_T={affiliate:"Sampel affiliate",gratis:"Sampel gratis"};
+const isSmpMove=m=>m.type==="kirim"&&m.channel==="Sampel / promosi";
+function lapRows(ch,a,b){const out=[];for(let m=a.slice(0,7);m<=b.slice(0,7);m=lapNextM(m))for(const x of dailyStats(m,ch))if(x.date>=a&&x.date<=b)out.push(x);return out;}
+function lapAgg(R){const T={n:0,gross:0,fee:0,refund:0,hpp:0,ads:0,adsGmv:0,adsOrders:0,cImpr:0,cClicks:0,cAds:0,cOrd:0,days:0};
+  for(const x of R){for(const k of ["n","gross","fee","refund","hpp","ads","adsGmv","adsOrders"])T[k]+=x[k]||0;if(x.ctr!=null){T.cImpr+=x.impr;T.cClicks+=x.clicks;T.cAds+=x.ads;T.cOrd+=x.adsOrders;}if(x.n)T.days++;}
+  T.cm=T.gross-T.fee-T.refund-T.hpp;T.profit=T.cm-T.ads;T.aov=T.n?T.gross/T.n:null;T.roas=T.ads?T.adsGmv/T.ads:null;T.be=T.cm>0?T.gross/T.cm:null;T.roi=T.ads?T.profit/T.ads:null;
+  T.acos=T.adsGmv?T.ads/T.adsGmv:null;T.tacos=T.gross?T.ads/T.gross:null;T.ctr=T.cImpr?T.cClicks/T.cImpr:null;T.cpc=T.cClicks?T.cAds/T.cClicks:null;T.cvr=T.cClicks?T.cOrd/T.cClicks:null;T.margin=T.gross?T.profit/T.gross:null;return T;}
+/* paid orders vs Rp0 sample orders in a period (dailyStats counts both) */
+function lapCnt(ch,a,b){let paid=0,samp=0;for(const o of ORD())if(o.channel===ch&&o.date>=a&&o.date<=b&&counts(o)){if(orderTotals(o).gross>0)paid++;else samp++;}return{paid,samp};}
+function lapKpis(T,P,label){
+  const d=(a,b)=>b?` · <span class="${a>=b?"pos":"neg"}">${a>=b?"▲":"▼"} ${lapPc(Math.abs(a/b-1))}</span> vs ${label}`:"";
+  const k=(l,v,s,c="")=>`<div class="kpi"><span>${l}</span><b class="${c}">${v}</b><span>${s}</span></div>`;
+  return`<div class="kpis">${k("Omzet kotor",rp0(T.gross),`${num(T.paid)} pesanan berbayar${T.samp?` · ${num(T.samp)} sampel Rp0`:""}${d(T.gross,P.gross)}`)}${k("Laba setelah iklan",rp0(T.profit),`Margin ${lapPc(T.margin)}${P.profit>0?d(T.profit,P.profit):""}`,T.profit<0?"neg":"")}${k("ROAS",f2(T.roas),`Impas ${f2(T.be)} · ${T.roas&&T.be?(T.roas>=T.be?'<span class="pos">di atas impas</span>':'<span class="neg">di bawah impas</span>'):T.roas?'<span class="neg">laba kotor minus, iklan pasti rugi</span>':"data iklan belum ada"}`)}${k("ROI iklan",lapPc(T.roi),`Laba setelah iklan ÷ biaya iklan ${rp0(T.ads)}`,T.roi!=null&&T.roi<0?"neg":"")}</div>
+  <div class="kpis">${k("AOV",T.aov?rp0(T.aov):"–",`Omzet ÷ pesanan berbayar${d(T.aov||0,P.aov||0)}`)}${k("ACOS · TACOS",`${lapPc(T.acos)} · ${lapPc(T.tacos)}`,`Batas ACOS (margin sebelum iklan) ${lapPc(T.gross?T.cm/T.gross:null)}`)}${k("CTR · CPC",`${lapPc(T.ctr)} · ${T.cpc?rp0(T.cpc):"–"}`,"Klik ÷ tayangan · biaya per klik")}${k("CVR iklan",lapPc(T.cvr),`Pesanan dari iklan ÷ klik · ${num(T.adsOrders)} pesanan iklan`)}</div>`;}
+/* SKU sold: every product from isi 1 up, including those that sold 0. Units/orders exclude Rp0 sample orders; profit from skuStats (same estimate as elsewhere) */
+function lapSkuMerge(ch,a,b){const M0={};for(let m=a.slice(0,7);m<=b.slice(0,7);m=lapNextM(m)){const f=a>m+"-01"?a:m+"-01",t=b<endOf(m)?b:endOf(m);
+  for(const r of skuStats(m,ch,f,t)){const y=M0[r.id]||={gross:0,cm:0,ads:0,profit:0};for(const k of ["gross","cm","ads","profit"])y[k]+=r[k]||0;}}return M0;}
+function lapSku(ch,a,b){const pm=pmap(),M0=lapSkuMerge(ch,a,b),U={};
+  const SC={fee:0,hpp:0,n:0};for(const o of ORD())if((ch==="Semua"||o.channel===ch)&&o.date>=a&&o.date<=b&&counts(o)){const t=orderTotals(o);if(!(t.gross>0)){/* Rp0 sample: its cost is shown on its own row, not charged to the SKU */SC.n++;SC.fee+=t.fee+(t.refund||0);SC.hpp+=t.hpp;const q=t.qty||1;for(const it of o.items||[]){const y=M0[it.productId];if(!y)continue;const c=(t.fee+(t.refund||0))*(+it.qty||0)/q+(+it.qty||0)*(+it.hpp||hppOf(it.productId));y.cm+=c;y.profit+=c;}continue;}const seen=new Set();for(const it of o.items||[]){const u=U[it.productId]||={units:0,n:0};u.units+=+it.qty||0;if(!seen.has(it.productId)){seen.add(it.productId);u.n++;}}}
+  const ids=new Set([...S.products.filter(p=>p.active!==false).map(p=>p.id),...Object.keys(U),...Object.keys(M0)]);
+  const rows=[...ids].map(id=>({id,p:pm[id],name:pname(id,pm),pcs:+pm[id]?.pcs||0,...(U[id]||{units:0,n:0}),...(M0[id]||{gross:0,cm:0,ads:0,profit:0})})).sort((x,y)=>x.pcs-y.pcs||x.name.localeCompare(y.name));
+  const T=rows.reduce((t,r)=>{t.units+=r.units;t.n+=r.n;t.soap+=r.units*r.pcs;t.gross+=r.gross;t.profit+=r.profit;return t;},{units:0,n:0,soap:0,gross:0,profit:0});const scT=SC.fee+SC.hpp;T.profit-=scT;
+  return`<div class="panel" id="lap-sku"><h3>Kinerja SKU · terjual ${a===b?fdate(a):`${fdate(a)} – ${fdate(b)}`}</h3>
+  <div class="tbl"><table><thead><tr><th>SKU</th><th class="n">Pesanan</th><th class="n">Pcs terjual</th><th class="n">Sabun batang</th><th class="n">Omzet</th><th class="n">Porsi omzet</th><th class="n">Iklan (est.)</th><th class="n">Laba setelah iklan</th><th class="n">Margin</th><th class="n">Laba / pesanan</th></tr></thead><tbody>
+  ${rows.map(r=>`<tr${r.units?"":' class="mut"'}><td>${esc(r.name)}</td><td class="n">${num(r.n)}</td><td class="n"><b>${num(r.units)}</b></td><td class="n">${num(r.units*r.pcs)}</td><td class="n">${rp0(r.gross)}</td><td class="n">${lapPc(T.gross?r.gross/T.gross:null)}</td><td class="n mut">${rp0(r.ads)}</td><td class="n ${r.profit<0?"neg":""}">${rp0(r.profit)}</td><td class="n">${lapPc(r.gross?r.profit/r.gross:null)}</td><td class="n">${r.n?rp0(r.profit/r.n):"–"}</td></tr>`).join("")}${scT?`<tr><td><i>Biaya sampel Rp0</i><div class="hint">${num(SC.n)} pesanan sampel: ongkir/biaya ${rp0(SC.fee)} + HPP ${rp0(SC.hpp)}</div></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="n neg">${rp0(-scT)}</td><td></td><td></td></tr>`:""}</tbody>
+  <tfoot><tr><td>Total</td><td class="n"></td><td class="n">${num(T.units)}</td><td class="n">${num(T.soap)}</td><td class="n">${rp0(T.gross)}</td><td></td><td></td><td class="n ${T.profit<0?"neg":""}">${rp0(T.profit)}</td><td class="n">${lapPc(T.gross?T.profit/T.gross:null)}</td><td></td></tr></tfoot></table></div>
+  <p class="hint">Semua SKU ditampilkan, termasuk yang terjual 0 (abu-abu). Pesanan = jumlah pesanan yang memuat SKU itu. Sampel Rp0 tidak dihitung sebagai terjual, dan biayanya (ongkir + HPP) ditampilkan di baris sendiri supaya laba per SKU tidak tercampur; total laba tetap sama dengan laba rugi di atas. Biaya iklan per SKU adalah perkiraan.</p></div>`;}
+/* samples: Rp0 orders through this marketplace + warehouse "Barang keluar · Sampel / promosi" tagged for this platform (untagged shown separately) */
+function smpMoves(a,b){const pm=pmap(),G={};for(const m of S.moves)if(isSmpMove(m)&&m.date>=a&&m.date<=b){const k=(m.samplePlat||"")+"|"+(m.sampleType||""),g=G[k]||={plat:m.samplePlat||"",type:m.sampleType||"",n:0,soap:0,resi:0};g.n++;g.resi+=+m.resi||0;for(const it of m.items||[])g.soap+=(+it.qty||0)*(+pm[it.productId]?.pcs||0);}return Object.values(G);}
+function lapSamples(ch,a,b){const pm=pmap();let n=0,soap=0,hpp=0,fee=0,cr=0,crG=0;const crs=new Set();
+  for(const o of ORD())if(o.channel===ch&&o.date>=a&&o.date<=b&&o.status!=="batal"&&o.status!=="pending"){const t=orderTotals(o);
+    if(o.imported&&!(t.gross>0)){n++;hpp+=t.hpp;fee+=t.fee;for(const it of o.items||[])soap+=(+it.qty||0)*(+pm[it.productId]?.pcs||0);continue;}
+    if(counts(o)&&o.creator){cr++;crG+=t.gross;crs.add(o.creator);}}
+  const G=smpMoves(a,b),mine=G.filter(g=>g.plat===ch),un=G.filter(g=>!g.plat),sm=L=>L.reduce((t,g)=>({n:t.n+g.n,soap:t.soap+g.soap}),{n:0,soap:0}),U=sm(un);
+  return`<div class="panel" id="lap-smp"><h3>Sampel & affiliate</h3><div class="tbl"><table><tbody>
+  <tr><td>Sampel lewat ${esc(ch)} (pesanan Rp0)</td><td class="n">${num(n)} pesanan</td><td class="n">${num(soap)} sabun</td><td class="hint">HPP ${rp0(hpp)} · ongkir/biaya dipotong ${rp0(fee)}</td></tr>
+  ${mine.map(g=>`<tr><td>Barang keluar · ${esc(SMP_T[g.type]||"Sampel (jenis belum dipilih)")}</td><td class="n">${num(g.n)} catatan</td><td class="n">${num(g.soap)} sabun</td><td class="hint">dikirim sendiri dari gudang${g.resi?` · ${num(g.resi)} resi`:""}</td></tr>`).join("")}
+  ${U.n?`<tr class="mut"><td>Barang keluar · Sampel / promosi (belum dipilah)</td><td class="n">${num(U.n)} catatan</td><td class="n">${num(U.soap)} sabun</td><td class="hint">platform belum dipilih, jadi tidak dihitung ke ${esc(ch)}</td></tr>`:""}
+  ${ch===TT?`<tr><td><b>Penjualan dari affiliate</b></td><td class="n">${num(cr)} pesanan</td><td class="n">${num(crs.size)} kreator</td><td class="hint">omzet ${rp0(crG)}${n?` · ${(cr/n).toFixed(1).replace(".",",")} pesanan affiliate per sampel`:""}</td></tr>`:""}
+  </tbody></table></div><p class="hint">Sampel bukan penjualan: tidak masuk pcs terjual. Barang keluar baru bisa dipilah jenis dan platformnya di formulir Barang keluar (modul Stok).${ch===SP?" Affiliate Shopee per kreator ada di bagian Iklan & analitik di bawah.":""}</p></div>`;}
+function lapVideoMini(a,b){const vr=S.adsreports.filter(r=>r.kind==="videocre"&&r.from<=b&&r.to>=a).map(r=>({r,ov:mdays(r.from>a?r.from:a,r.to<b?r.to:b)})).sort((x,y)=>y.ov-x.ov||(y.r.created||0)-(x.r.created||0))[0]?.r;
+  if(!vr)return{html:`<div class="panel" id="lap-video"><h3>Video iklan</h3><p class="hint">Belum ada file <b>Creatives video data</b> yang mencakup periode ini.</p></div>`,waste:null};
+  const be=videoBe(vr),R=(vr.rows||[]).filter(x=>x.spend>0),sp=R.reduce((s,x)=>s+x.spend,0),rug=R.filter(x=>x.gmv/x.spend<be),waste=sp?rug.reduce((s,x)=>s+x.spend,0)/sp:null;
+  const win=R.filter(x=>x.spend>=10000&&x.gmv/x.spend>=4).sort((x,y)=>y.gmv-x.gmv).slice(0,5),lose=rug.filter(x=>x.spend>=20000).sort((x,y)=>y.spend-x.spend).slice(0,5);
+  const li=(L,e)=>L.length?`<div class="tbl"><table><thead><tr><th>Video</th><th>Akun</th><th class="n">Biaya</th><th class="n">Penjualan</th><th class="n">ROAS</th><th class="n">Konversi</th></tr></thead><tbody>${L.map(x=>`<tr><td class="wrapcell">${esc((x.title||"(tanpa judul)").slice(0,70))}</td><td>@${esc(x.acct)}</td><td class="n">${rp0(x.spend)}</td><td class="n">${rp0(x.gmv)}</td><td class="n">${f2(x.gmv/x.spend)}</td><td class="n">${lapPc(x.cvr)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="hint">${e}</p>`;
+  return{waste,html:`<div class="panel" id="lap-video"><h3>Video iklan</h3><p class="hint">Dari file video ${fdate(vr.from)} – ${fdate(vr.to)} (periode file, bukan per hari): biaya video ${rp0(sp)}, ROAS ${sp?f2(R.reduce((s,x)=>s+x.gmv,0)/sp):"–"}, <b class="${waste>0.4?"neg":""}">${lapPc(waste)} biaya masuk ke video rugi</b> (ROAS di bawah ${f2(be)}). Analisa lengkap per video ada di tampilan Bulanan.</p>
+  <div class="grid2"><div><h3>Pemenang (ROAS ≥ 4)</h3>${li(win,"Belum ada video pemenang dengan biaya cukup.")}</div><div><h3>Rugi: keluarkan dari iklan</h3>${li(lose,"Tidak ada video rugi dengan biaya besar.")}</div></div></div>`};}
+function lapDayTable(R){const r=x=>`<tr><td>${new Date(x.date+"T00:00").toLocaleDateString("id-ID",{weekday:"short",day:"2-digit",month:"short"})}</td><td class="n">${num(x.n)}</td><td class="n">${rp0(x.gross)}</td><td class="n mut">${rp0(-(x.fee+x.refund))}</td><td class="n mut">${rp0(-x.hpp)}</td><td class="n mut">${rp0(-x.ads)}</td><td class="n ${x.profit<0?"neg":""}"><b>${rp0(x.profit)}</b></td><td class="n">${x.roas!=null?roasPill(x.roas,x.be):"–"}</td><td class="n">${lapPc(x.acos)}</td><td class="n">${lapPc(x.tacos)}</td><td class="n">${x.aov?rp0(x.aov):"–"}</td></tr>`;
+  return`<div class="panel" id="lap-hari"><h3>Per hari</h3><div class="tbl"><table><thead><tr><th>Hari</th><th class="n">Pesanan</th><th class="n">Omzet</th><th class="n">Potongan & retur</th><th class="n">HPP</th><th class="n">Iklan</th><th class="n">Laba setelah iklan</th><th class="n">ROAS</th><th class="n">ACOS</th><th class="n">TACOS</th><th class="n">AOV</th></tr></thead><tbody>${R.map(r).join("")}</tbody></table></div>
+  <p class="hint">Laba setelah iklan sebelum beban operasional. Potongan pesanan yang belum cair masih estimasi.</p></div>`;}
+function lapFind(ch,T,P,a,b,vWaste){const K=[],pm=pmap();
+  if(T.gross&&T.profit<0)K.push(["bad",`Laba setelah iklan minus ${rp0(T.profit)}: potongan, HPP, dan iklan lebih besar dari omzet.`]);
+  if(T.roas&&T.be){if(T.roas<T.be)K.push(["bad",`ROAS ${f2(T.roas)} di bawah impas ${f2(T.be)}: kurangi budget atau naikkan target ROAS ke minimal ${f2(T.be*1.15)}, dan matikan kampanye/video dengan ROAS terendah.`]);
+    else if(T.roas<T.be*1.2)K.push(["warn",`ROAS ${f2(T.roas)} tipis di atas impas ${f2(T.be)}: pindahkan budget ke kampanye/SKU dengan ROAS tertinggi.`]);
+    else K.push(["good",`ROAS ${f2(T.roas)} sehat (impas ${f2(T.be)}): budget boleh dinaikkan bertahap 15–20% per 3 hari selama ROAS tetap ≥ ${f2(T.be*1.3)}.`]);}
+  else if(T.gross&&!T.ads)K.push(["info","Data iklan untuk periode ini belum diimpor, jadi laba setelah iklan masih terlalu tinggi."]);
+  if(P.gross){const g=T.gross/P.gross-1;if(g<=-0.1)K.push(["warn",`Omzet turun ${lapPc(-g)} dibanding periode sebelumnya (${rp0(T.gross)} vs ${rp0(P.gross)}). Cek kampanye, LIVE, kreator, atau stok yang berhenti.`]);else if(g>=0.1)K.push(["good",`Omzet naik ${lapPc(g)} dibanding periode sebelumnya. Catat apa yang berubah dan pertahankan.`]);}
+  if(P.ads&&T.ads){const g=T.ads/P.ads-1;if(g<=-0.2&&T.roas&&T.be&&T.roas>=T.be*1.3)K.push(["warn",`Belanja iklan turun ${lapPc(-g)} padahal ROAS masih ${f2(T.roas)}: tambah materi iklan baru yang menjual dan naikkan budget bertahap.`]);}
+  if(T.tacos!=null&&T.gross&&T.cm>0&&T.tacos>T.cm/T.gross*0.6)K.push(["warn",`TACOS ${lapPc(T.tacos)} memakan lebih dari 60% margin sebelum iklan (${lapPc(T.cm/T.gross)}): perbesar penjualan organik (konten, ulasan, pembeli ulang).`]);
+  if(T.ctr!=null&&T.ctr<0.01)K.push(["warn",`CTR iklan ${lapPc(T.ctr)} rendah: ganti hook 3 detik pertama, thumbnail, atau judul.`]);
+  if(T.cvr!=null&&T.cvr<0.02)K.push(["warn",`CVR iklan ${lapPc(T.cvr)} rendah: banyak klik tapi sedikit beli. Perbaiki foto, harga/voucher, dan ulasan.`]);
+  let one=0,tot=0;for(const o of ORD())if(o.channel===ch&&o.date>=a&&o.date<=b&&counts(o)&&orderTotals(o).gross>0){tot++;if((o.items||[]).every(it=>+pm[it.productId]?.pcs===1))one++;}
+  if(tot>=10)K.push([one/tot>0.4?"warn":"good",`Porsi pesanan isi 1: ${lapPc(one/tot)}${one/tot>0.4?". Dorong bundle isi 2–4 (laba per pesanan lebih besar) lewat Paket Diskon atau voucher minimal belanja.":". Bundle sudah dominan."}`]);
+  if(vWaste!=null&&vWaste>0.4)K.push(["warn",`${lapPc(vWaste)} biaya video iklan masuk ke video rugi: keluarkan video di daftar "Rugi" dari materi GMV Max.`]);
+  const lp={bad:'<span class="pill bad">Perlu tindakan</span>',warn:'<span class="pill warn">Perhatikan</span>',good:'<span class="pill good">Baik</span>',info:'<span class="pill">Info</span>'},o={bad:0,warn:1,good:2,info:3};K.sort((x,y)=>o[x[0]]-o[y[0]]);
+  return`<div class="panel" id="lap-kes"><h3>Kesimpulan & yang harus dilakukan</h3>${K.map(([l,s])=>`<div style="padding:6px 0;border-top:1px solid var(--line)">${lp[l]} ${s}</div>`).join("")||'<p class="hint">Belum cukup data.</p>'}</div>`;}
+/* channel P&L for the chosen period (down to the channel's contribution; shared costs stay on the Dashboard) */
+function lapPL(ch,a,b,mode,adsT){let L;
+  if(mode==="bulan"){const p=monthPL(a.slice(0,7),ch);L={gross:p.gross,fee:p.fee,feeBy:p.feeBy,refund:p.refund,adj:p.adj||0,hpp:p.hpp,ads:p.ads,inc:p.incomeBy||{}};}
+  else{L={gross:0,fee:0,feeBy:{},refund:0,adj:0,hpp:0,ads:adsT,inc:{}};const add=(k,v)=>{if(v)L.feeBy[k]=(L.feeBy[k]||0)+v;};
+    for(const o of ORD())if(o.channel===ch&&o.date>=a&&o.date<=b&&counts(o)){const t=orderTotals(o);L.gross+=t.gross;L.fee+=t.fee;L.refund+=t.refund||0;L.hpp+=t.hpp;
+      if(t.comp){let cs=0;for(const [k,v] of Object.entries(t.comp)){if(/GMV Max|Isi Saldo Otomatis/i.test(k))continue;add(feeGroup(k),v);cs+=v;}add("Biaya lain (selisih rincian)",t.fee-cs);}
+      else if(t.settled)add(`Potongan ${ch} (tanpa rincian)`,t.fee);else if(t.est)add(t.sampleEst?"Estimasi ongkir sampel affiliate belum cair":"Estimasi potongan pesanan belum cair",t.fee);}
+    for(const [k,v] of Object.entries(L.feeBy))if(v<=-0.5){L.inc[k]=(L.inc[k]||0)-v;L.fee-=v;delete L.feeBy[k];}}
+  const G=L.gross,inc=Object.values(L.inc).reduce((s,v)=>s+v,0),net=G-L.fee-L.refund-L.adj,gp=net-L.hpp,res=gp-L.ads+inc;
+  const pc=v=>G?(v<0?"−":"")+(Math.abs(v)/G*100).toFixed(1).replace(".",",")+"%":"";
+  const row=(l,v,{cls="",neg,sub}={})=>`<tr class="${cls}"><td${sub?' style="padding-left:28px" class="mut"':""}>${l}</td><td class="n ${(neg?-v:v)<-0.5?"neg":""}">${rp0(neg?-v:v)}</td><td class="n mut">${sub||neg?pc(Math.abs(v)):pc(v)}</td></tr>`;
+  const fb=Object.entries(L.feeBy).filter(([,v])=>Math.abs(v)>=0.5).sort((x,y)=>y[1]-x[1]);
+  return`<div class="panel" id="lap-pl"><h3>Laba rugi ${esc(ch)} · ${a===b?fdate(a):`${fdate(a)} – ${fdate(b)}`}</h3><div class="tbl"><table><thead><tr><th></th><th class="n">Rp</th><th class="n">% omzet</th></tr></thead><tbody>
+  ${row("<b>Penjualan kotor</b>",G)}${row("Potongan marketplace",L.fee,{neg:1})}${fb.map(([k,v])=>row(esc(k),-v,{sub:1})).join("")}
+  ${L.refund?row("Retur & pengembalian dana",L.refund,{neg:1}):""}${L.adj?row("Selisih pencairan marketplace",L.adj,{neg:1}):""}
+  ${row("<b>Penjualan bersih</b>",net,{cls:"pc-t"})}${row("HPP",L.hpp,{neg:1})}${row("<b>Laba kotor</b>",gp)}${row("Iklan",L.ads,{neg:1})}
+  ${Object.entries(L.inc).map(([k,v])=>row(esc(k),v,{sub:1})).join("")}
+  <tr style="font-weight:700;background:var(--sunk)"><td>Laba setelah iklan (kontribusi ${esc(ch)})</td><td class="n ${res<0?"neg":"pos"}">${rp0(res)}</td><td class="n">${pc(res)}</td></tr>
+  </tbody></table></div><p class="hint">Sampai kontribusi channel: beban operasional bersama (gaji, listrik, dll.), affiliate yang dibayar terpisah, dan penyusutan tidak dibagi per platform; lihat laba bersih perusahaan di Dashboard. ${mode==="bulan"?"Angka bulanan sama dengan kolom channel di tabel Laba rugi per marketplace di Dashboard.":"Iklan harian/mingguan: TikTok dari Campaign overview per hari, Shopee dari laporan iklan yang dibagi rata per hari. Potongan pesanan yang belum cair masih estimasi."}</p></div>`;}
+function lapLastDay(ch){const T0=today();let d="";for(const o of ORD())if(o.channel===ch&&counts(o)&&o.date<=T0&&o.date>d)d=o.date;return d||T0;}
+function lapDefDay(ch){const m=M(),T0=today(),days=ORD().filter(o=>o.channel===ch&&(o.date||"").slice(0,7)===m&&o.date<=T0&&counts(o)).map(o=>o.date).sort();return days[days.length-1]||(m===T0.slice(0,7)?T0:endOf(m));}
+function lapView(ch){
+  const nm=ch===SP?"Shopee":"TikTok Shop",mode=LAP.mode[ch]||"bulan",m=M(),T0=today();
+  const imp=S.canWrite?`<button class="btn pri" data-import="${ch}">Impor file ${ch===SP?"Shopee":"TikTok"}</button>`:"";
+  const modes=`<div class="chips">${[["hari","Harian"],["minggu","Mingguan"],["bulan","Bulanan"]].map(([k,l])=>`<button data-lapmode="${ch}|${k}" aria-pressed="${mode===k}">${l}</button>`).join("")}</div>`;
+  let a,b,ctrl,pa,pb,plabel;
+  if(mode==="hari"){let d=LAP.day[ch];if(!d||d.slice(0,7)!==m)d=lapDefDay(ch);a=b=d;pa=pb=addDays(d,-1);plabel="kemarin";
+    ctrl=`<label class="hint" style="display:flex;gap:6px;align-items:center">Tanggal <input type="date" data-lapday="${ch}" value="${d}" max="${T0}" style="width:auto"></label>`;}
+  else if(mode==="minggu"){let s=LAP.wk[ch]||wkMon(lapLastDay(ch));a=s;b=addDays(s,6);pa=addDays(s,-7);pb=addDays(s,-1);plabel="minggu lalu";
+    ctrl=`<button class="btn sm" data-lapwk="${ch}|-1">◀</button><span class="hint"><b>${fdate(a)} – ${fdate(b)}</b>${b>T0?" (berjalan)":""}</span><button class="btn sm" data-lapwk="${ch}|1"${addDays(a,7)>T0?" disabled":""}>▶</button>`;if(b>T0)b=T0;}
+  else{a=m+"-01";b=endOf(m)<T0?endOf(m):T0;const pm0=perfPrevM(m);pa=pm0+"-01";pb=addDays(pa,mdays(a,b)-1);if(pb>endOf(pm0))pb=endOf(pm0);plabel=`${mshort(pm0)} periode sama`;
+    ctrl=`<span class="hint">${esc(mname(m))} · ganti bulan lewat Periode di kanan atas</span>`;}
+  const R=lapRows(ch,a,b),T=lapAgg(R),P=lapAgg(lapRows(ch,pa,pb));Object.assign(T,lapCnt(ch,a,b));Object.assign(P,lapCnt(ch,pa,pb));T.aov=T.paid?T.gross/T.paid:null;P.aov=P.paid?P.gross/P.paid:null;
+  const go=[["lap-pl","Laba rugi"],["lap-kes","Kesimpulan"],["lap-sku","SKU"],["lap-hari","Per hari"],...(mode==="bulan"?[["lap-iklan","Iklan & analitik"]]:[]),...(ch===TT||mode==="bulan"?[["lap-video","Video"]]:[]),["lap-smp","Sampel & affiliate"]];
+  const head=`<div class="row"><h2>Laporan ${nm}</h2><div class="sp"></div>${imp}</div><div class="row">${modes}${ctrl}</div>
+  <div class="chips">${go.map(([id,l])=>`<button data-lapgo="${id}">${l}</button>`).join("")}</div>`;
+  if(!T.gross&&!T.ads&&mode!=="bulan")return head+lapKpis(T,P,plabel)+lapPL(ch,a,b,mode,T.ads)+emptyBox(`Belum ada penjualan ${nm} di periode ini`,"Pilih tanggal lain atau impor file pesanan.")+lapSamples(ch,a,b);
+  let body=lapKpis(T,P,plabel)+lapPL(ch,a,b,mode,T.ads);
+  if(mode==="bulan"){
+    body+=`<div id="lap-kes" style="display:grid;gap:20px;min-width:0">${lapNoKpi(V.perf({embed:true,mode:"bulan",ch}))}</div>`;
+    body+=lapSku(ch,a,b);
+    body+=`<div id="lap-hari" style="display:grid;gap:20px;min-width:0">${lapEmbed(V.daily({embed:true,ch}))}</div>`;
+    body+=`<div id="lap-iklan" style="display:grid;gap:20px;min-width:0">${lapEmbed(ch===SP?V.adsShopee():V.adsTT())}</div>`;
+    body+=ch===TT?`<div id="lap-video" style="display:grid;gap:20px;min-width:0">${lapEmbed(V.video())}</div>`:`<div class="panel" id="lap-video"><h3>Video & live Shopee</h3><p class="hint">Data per video Shopee dan per sesi live Shopee belum ada di file yang diimpor. Porsi penjualan dari video dan live ada di bagian Sumber penjualan di atas. Begitu file performa Shopee Video / Shopee Live diimpor, bagian ini akan terisi.</p></div>`;
+  }else{
+    const V0=ch===TT?lapVideoMini(a,b):{html:"",waste:null};
+    if(mode==="hari")body+=`<div id="lap-kes" style="display:grid;gap:20px;min-width:0">${lapNoKpi(V.perf({embed:true,mode:"hari",ch,day:a}))}</div>`;
+    else body+=lapFind(ch,T,P,a,b,V0.waste);
+    body+=lapSku(ch,a,b)+lapDayTable(R.filter(x=>x.n||x.ads))+V0.html;
+  }
+  return head+body+lapSamples(ch,a,b);
+}
+V.lapTT=()=>lapView(TT);
+V.lapSP=()=>lapView(SP);
+document.addEventListener("click",e=>{const t=e.target.closest&&e.target.closest("[data-lapmode],[data-lapwk],[data-lapgo]");if(!t)return;
+  if(t.dataset.lapgo){const el=document.getElementById(t.dataset.lapgo);if(el)window.scrollTo({top:el.getBoundingClientRect().top+scrollY-(document.querySelector("header")?.offsetHeight||0)-12,behavior:"smooth"});return;}
+  if(t.dataset.lapmode){const [c,k]=t.dataset.lapmode.split("|");LAP.mode[c]=k;lapSave();render();return;}
+  const [c,s]=t.dataset.lapwk.split("|");LAP.wk[c]=addDays(LAP.wk[c]||wkMon(today()),7*(+s||0));lapSave();render();});
+document.addEventListener("change",e=>{const t=e.target;if(!t.matches||!t.matches("[data-lapday]")||!t.value)return;const c=t.dataset.lapday;LAP.day[c]=t.value;lapSave();
+  if(t.value.slice(0,7)!==monthSel.value){monthSel.value=t.value.slice(0,7);}render();});
+/* SKU sold per month, all channels (tab Laporan) */
+function skuAllHtml(m){const pm=pmap(),a=m+"-01",b=endOf(m),chs=[TT,SP,"Offline","Lainnya"],U={};
+  for(const o of ORD())if(o.date>=a&&o.date<=b&&counts(o)){const t=orderTotals(o);if(!(t.gross>0))continue;for(const it of o.items||[]){const u=U[it.productId]||={g:0};u[o.channel]=(u[o.channel]||0)+(+it.qty||0);u.g+=(+it.qty||0)*(+it.price||0);}}
+  const used=chs.filter(c=>Object.values(U).some(u=>u[c]));const ids=new Set([...S.products.filter(p=>p.active!==false).map(p=>p.id),...Object.keys(U)]);
+  const rows=[...ids].map(id=>{const u=U[id]||{g:0},tot=used.reduce((s,c)=>s+(u[c]||0),0);return{id,name:pname(id,pm),pcs:+pm[id]?.pcs||0,u,tot};}).sort((x,y)=>x.pcs-y.pcs||x.name.localeCompare(y.name));
+  const T={tot:0,soap:0,g:0};for(const r of rows){T.tot+=r.tot;T.soap+=r.tot*r.pcs;T.g+=r.u.g;for(const c of used)T[c]=(T[c]||0)+(r.u[c]||0);}
+  const G=smpMoves(a,b),sN=G.reduce((s,g)=>s+g.n,0),sSoap=G.reduce((s,g)=>s+g.soap,0);let rN=0,rSoap=0;for(const o of ORD())if(o.date>=a&&o.date<=b&&o.status!=="batal"&&o.status!=="pending"&&((o.imported&&!(orderTotals(o).gross>0))||isSample(o))){rN++;for(const it of o.items||[])rSoap+=(+it.qty||0)*(+pm[it.productId]?.pcs||0);}
+  return`<div class="panel"><h3>SKU terjual ${esc(mname(m))} · semua channel</h3><div class="tbl"><table><thead><tr><th>SKU</th>${used.map(c=>`<th class="n">${esc(c)}</th>`).join("")}<th class="n">Total pcs</th><th class="n">Sabun batang</th><th class="n">Omzet</th></tr></thead><tbody>
+  ${rows.map(r=>`<tr${r.tot?"":' class="mut"'}><td>${esc(r.name)}</td>${used.map(c=>`<td class="n">${num(r.u[c]||0)}</td>`).join("")}<td class="n"><b>${num(r.tot)}</b></td><td class="n">${num(r.tot*r.pcs)}</td><td class="n">${rp0(r.u.g)}</td></tr>`).join("")}</tbody>
+  <tfoot><tr><td>Total</td>${used.map(c=>`<td class="n">${num(T[c]||0)}</td>`).join("")}<td class="n">${num(T.tot)}</td><td class="n">${num(T.soap)}</td><td class="n">${rp0(T.g)}</td></tr></tfoot></table></div>
+  <p class="hint">Pcs = jumlah paket terjual (pesanan batal dan belum dibayar tidak dihitung). Sampel tidak dihitung sebagai terjual: bulan ini ${num(rN)} pesanan sampel (Rp0 / ditandai sampel, ${num(rSoap)} sabun) dan ${num(sN)} catatan Barang keluar "Sampel / promosi" (${num(sSoap)} sabun).</p></div>`;}
+/* small warehouse summary on the Stok tab */
+function smpStockPanel(){const m=M(),G=smpMoves(m+"-01",endOf(m));if(!G.length)return"";const n=G.reduce((s,g)=>s+g.n,0),soap=G.reduce((s,g)=>s+g.soap,0);
+  return`<div class="panel"><div class="row"><h3>Sabun keluar untuk sampel ${esc(mname(m))}</h3><div class="sp"></div><b>${num(soap)} sabun</b><span class="hint">${num(n)} catatan</span></div>
+  <div class="hint">${G.sort((x,y)=>y.soap-x.soap).map(g=>`${esc(SMP_T[g.type]||"Jenis belum dipilih")}${g.plat?` · ${esc(g.plat)}`:" · platform belum dipilih"}: ${num(g.soap)} sabun (${num(g.n)})`).join(" · ")}</div></div>`;}
+/* Dashboard keeps the all-channel analysis (break-even, projection, action plan) that used to live in Analisa Kinerja */
+
 /* ---------- Piutang karyawan: kasbon/pinjaman karyawan dan pembayarannya (tunai/transfer atau potong gaji) ---------- */
 function empState(asOf="9999-12-31"){const E={};
   for(const x of S.emploans){if((x.date||"")>asOf||!x.emp)continue;const k=skey(x.emp),e=E[k]||={name:x.emp,loan:0,paid:0,plan:0,lastLoan:"",lastPay:"",n:0};e.n++;
@@ -1558,7 +1708,7 @@ V.ar=()=>{
     ${months.length?`<div class="tbl"><table><thead><tr><th>Pesanan bulan</th><th class="n">Pesanan</th><th class="n">Nilai bersih</th><th class="n">Sudah cair</th><th class="n">Penyesuaian</th><th class="n">Sisa piutang</th><th></th></tr></thead><tbody>
     ${months.map(([m,r])=>`<tr><td>${m==="awal"?"Saldo awal (pesanan sebelum aplikasi)":esc(mname(m))}</td><td class="n">${num(r.orders)}</td><td class="n">${rp(r.net)}</td><td class="n">${rp(r.paid)}</td><td class="n mut">${r.adj?rp(r.adj):"–"}</td><td class="n ${r.left>0?"":"pos"}"><b>${rp(r.left)}</b></td><td>${Math.abs(r.left)<1?'<span class="pill good">Lunas</span>':S.canWrite&&m!=="awal"?`<button class="btn sm" data-recv="${ch}|${m}">Catat pencairan</button>`:""}</td></tr>`).join("")}
     </tbody></table></div>`:`<div class="empty">Tidak ada piutang ${ch} sampai akhir ${esc(mname(M()))}.</div>`}</div>`;}).join("");
-  return`<div class="row"><h2>Piutang marketplace</h2><div class="sp"></div>${S.canWrite?`<button class="btn" data-import>Impor income marketplace</button>`:""}${btn("receipt","+ Catat pencairan manual",1)}</div>
+  return`<div class="row"><h2>Piutang marketplace</h2><div class="sp"></div>${btn("receipt","+ Catat pencairan manual",1)}</div>
   <p class="hint">Posisi per ${fdate(end)}. Setiap pesanan Shopee / TikTok Shop (selain batal) menambah piutang sebesar nilai bersihnya di bulan pesanan. Pencairan yang dicatat untuk bulan pesanan tersebut mengurangi piutangnya, walaupun dananya baru masuk bulan berikutnya. Untuk TikTok Shop, impor file income: setiap pesanan dicocokkan dengan nomor pesanannya dan dananya masuk ke rekening Saldo TikTok Shop. Dana cair masuk ke saldo penjual TikTok (bukan langsung ke bank); saat saldo itu kamu tarik ke bank, catat sebagai transfer Saldo TikTok Shop → rekening bank.</p>
   ${sec}
   <div class="panel"><h3>Pencairan yang diterima di ${esc(mname(M()))}</h3>
@@ -1645,6 +1795,8 @@ V.set=()=>{const op=S.settings.arOpening||{};return`${userPanel()}<h2>Pengaturan
     <p class="hint">${num(S.orderdays.reduce((a,d)=>a+(d.orders||[]).length,0))} pesanan impor, ${num(S.settles.length)} hari pencairan, ${num(S.adsdaily.length)} hari data iklan, ${num(S.adsreports.length)} laporan iklan. Menghapus data impor tidak menyentuh pesanan manual, beban, atau rekening.</p>
     <div><button class="btn danger" id="delImp">Hapus semua data impor</button></div></div>`:""}`;};
 
+const _repView=V.report;V.report=()=>_repView()+skuAllHtml(M());
+const _dashView=V.dash;V.dash=()=>_dashView()+`<details class="panel"><summary><h3 style="display:inline">Analisa kinerja semua channel</h3> <span class="hint">kesimpulan, titik impas, proyeksi & rencana tindakan</span></summary><div style="display:grid;gap:20px;margin-top:12px">${V.perf({embed:true,mode:"bulan",ch:"Semua"})}</div></details>`;
 /* ---------- marketplace file import (parsed in the browser; buyer names/addresses are never read) ---------- */
 const clean=v=>String(v??"").replace(/[\t\r]/g,"").trim();
 const nv=v=>{const t=clean(v);if(!t||t==="-"||t==="/")return 0;const x=Number(t.replace(/,/g,""));return isFinite(x)?x:0;};
@@ -1984,7 +2136,10 @@ async function analyze(file){
 /* preview + save */
 const impdlg=document.getElementById("impdlg"),impbox=document.getElementById("impbox");
 let IMP=[];
-function openImport(){IMP=[];impbox.innerHTML=impHtml();impdlg.showModal();}
+let IMPCH=null;
+/* each platform report imports only its own files */
+function impGate(r){if(!IMPCH||!r||r.kind==="skip")return r;const c=r.ch||TT;if(c===IMPCH)return r;return{kind:"skip",name:r.name,label:r.label||"File",why:`Ini file ${c}. Impor lewat tombol Impor di tab Laporan ${c===SP?"Shopee":"TikTok"}.`};}
+function openImport(ch){IMPCH=ch||null;IMP=[];impbox.innerHTML=impHtml();impdlg.showModal();}
 function impHtml(busy){
   const hasInc=IMP.some(x=>x.kind==="income"&&x.withdrawals.length);
   mergeProdCamp(IMP);for(const x of IMP)trimOld(x);
@@ -2025,8 +2180,10 @@ function impHtml(busy){
     else d=`<div class="hint">${esc(x.why)}</div>`;
     return`<div class="panel" style="padding:12px"><div class="row"><b>${esc(x.label)}</b><div class="sp"></div><span class="pill ${x.kind==="skip"?"":"good"}">${x.kind==="skip"?"Dilewati":"Siap"}</span></div><div class="hint" style="overflow-wrap:anywhere">${esc(x.name)}</div>${d}</div>`;
   };
-  return`<h2>Impor file marketplace</h2>
-  <p class="hint">Pilih satu atau beberapa file sekaligus dari TikTok Shop: <b>Semua pesanan</b> (.csv), <b>income</b> (.xlsx), dan file data iklan & analitik (Campaign overview, Product data, Live campaign, Livestream, Creative data, Product Card Traffic, Live Performance Core). Jenis file dikenali otomatis. File dibaca di browser kamu. Data pembeli (username, nama, HP, kota, alamat sesuai file) disimpan untuk modul Pelanggan, yang hanya bisa dibuka CEO, Pemilik, dan Admin.</p>
+  return`<h2>Impor file ${IMPCH===SP?"Shopee":IMPCH===TT?"TikTok Shop":"marketplace"}</h2>
+  ${IMPCH?`<div class="banner">Hanya file ${IMPCH} yang diterima di sini. File platform lain otomatis dilewati.</div>`:""}
+  ${IMPCH===SP?`<p class="hint">Pilih satu atau beberapa file Shopee sekaligus: <b>Order.all</b>, <b>Income sudah dilepas</b>, laporan iklan Shopee, riwayat saldo iklan (adwords bill), transaksi saldo penjual, Meta Ads, SellerConversionReport, dan file statistik toko/produk/voucher. Jenis file dikenali otomatis dan file yang sama tidak tercatat dua kali.</p>`:""}
+  <p class="hint" ${IMPCH===SP?"hidden":""}>Pilih satu atau beberapa file sekaligus dari TikTok Shop: <b>Semua pesanan</b> (.csv), <b>income</b> (.xlsx), dan file data iklan & analitik (Campaign overview, Product data, Live campaign, Livestream, Creative data, Product Card Traffic, Live Performance Core). Jenis file dikenali otomatis. File dibaca di browser kamu. Data pembeli (username, nama, HP, kota, alamat sesuai file) disimpan untuk modul Pelanggan, yang hanya bisa dibuka CEO, Pemilik, dan Admin.</p>
   <label class="btn" style="justify-self:start" for="impfile">Pilih file…</label><input type="file" id="impfile" multiple accept=".csv,.xlsx,.xls" hidden>
   <div style="display:grid;gap:10px">${busy?`<div class="hint">${esc(busy)}</div>`:IMP.map(card).join("")}</div>
   ${hasInc?`<label class="field" style="max-width:340px"><span>Penarikan saldo TikTok masuk ke</span><select id="impacc">${sortAcc().filter(a=>a.id!==TT_ACC).map(a=>`<option value="${a.id}" ${a.id===(S.settings.ttWithdrawAcc||defAcc("bank"))?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>`:""}
@@ -2035,7 +2192,7 @@ function impHtml(busy){
 impbox.addEventListener("change",async e=>{
   if(e.target.id!=="impfile")return;
   const files=[...e.target.files];impbox.innerHTML=impHtml(`Membaca ${files.length} file…`);
-  const res=[];for(const f of files)res.push(await analyze(f));
+  const res=[];for(const f of files)res.push(impGate(await analyze(f)));
   IMP=[...IMP,...res];impbox.innerHTML=impHtml();
 });
 impbox.addEventListener("click",async e=>{
@@ -2170,7 +2327,7 @@ function skuStats(m,ch,from,to){
 }
 /* change history (website version): every add/change/delete is logged by the database with the user's ID */
 const AUD_COLL={customers:"Data pelanggan",emploans:"Piutang karyawan",products:"Produk",materials:"Bahan",production:"Produksi",orders:"Pesanan manual",purchases:"Pembelian",cash:"Kas/beban",moves:"Penyesuaian stok",accounts:"Rekening",transfers:"Transfer",receipts:"Pencairan manual",recurring:"Beban rutin",orderdays:"Impor pesanan",settles:"Impor pencairan",adsdaily:"Impor iklan harian",adsreports:"Impor laporan/analitik",returns:"Retur pembeli",supreturns:"Retur ke supplier",suppliers:"Supplier",appay:"Bayar hutang",apopen:"Hutang awal",config:"Pengaturan",profiles:"Pengguna"};
-const AUD_TAB={cust:["customers"],emp:["emploans"],sales:["orders","orderdays","returns"],buy:["purchases","suppliers","supreturns"],ap:["appay","apopen","suppliers","purchases"],stock:["products","materials","production","moves","returns","supreturns"],price:["products","materials"],cost:["cash","recurring"],bank:["accounts","transfers","cash"],ar:["receipts","settles","config"],ads:["adsdaily","adsreports"],set:null,dash:null,daily:["orderdays","settles","adsdaily"],report:null};
+const AUD_TAB={cust:["customers"],emp:["emploans"],sales:["orders","orderdays","returns"],buy:["purchases","suppliers","supreturns"],ap:["appay","apopen","suppliers","purchases"],stock:["products","materials","production","moves","returns","supreturns"],price:["products","materials"],cost:["cash","recurring"],bank:["accounts","transfers","cash"],ar:["receipts","settles","config"],ads:["adsdaily","adsreports"],set:null,dash:null,daily:["orderdays","settles","adsdaily"],lapTT:["orderdays","settles","adsdaily","adsreports"],lapSP:["orderdays","settles","adsreports"],report:null};
 const AUD_ACT={insert:["Tambah","good"],update:["Ubah","warn"],delete:["Hapus","bad"]};
 function auditDesc(e){
   const i=e.info||{},pm=pmap(),bits=[];
@@ -2440,7 +2597,7 @@ app.addEventListener("input",e=>{const f=e.target.closest?.("[data-calc]");if(!f
   if(k==="pid"){CALC.pTT="";CALC.pSP="";CALC.hpp="";CALC.volTT="";CALC.volSP="";}calcSave();
   if(k==="pid"||k==="period"){render();return;}const o=document.getElementById("calcOut");if(o)o.innerHTML=calcOut();});
 app.addEventListener("change",e=>{const cf=e.target.closest?.("[data-calcfee],[data-calcvol]");if(cf){if(cf.dataset.calcfee)CALC.on[cf.dataset.calcfee]=cf.checked;else CALC[cf.dataset.calcvol]=cf.value;calcSave();const o=document.getElementById("calcOut");if(o)o.innerHTML=calcOut();return;}});
-app.addEventListener("change",e=>{if(e.target.id==="dailyDay"){dailyDay=e.target.value;render();}if(e.target.id==="perfDay"){perfDay=e.target.value;render();}if(e.target.id==="custQ"){custQ=e.target.value;render();}if(e.target.id==="custAll"){custAll=e.target.checked;render();}});
+app.addEventListener("change",e=>{if(e.target.id==="dailyDay"){dailyDay=e.target.value;render();}if(e.target.id==="perfDay"){PERF.day=e.target.value;render();}if(e.target.id==="custQ"){custQ=e.target.value;render();}if(e.target.id==="custAll"){custAll=e.target.checked;render();}});
 app.addEventListener("click",async e=>{
   const b=e.target.closest("[data-team]");if(!b)return;const a=b.dataset.team,id=b.dataset.id;
   try{
@@ -2460,8 +2617,8 @@ app.addEventListener("click",e=>{
   const dch=t.closest("[data-dailych]");if(dch){dailyCh=dch.dataset.dailych;render();return;}
   const cuc=t.closest("[data-custch]");if(cuc){custCh=cuc.dataset.custch;render();return;}
   const cus=t.closest("[data-custsort]");if(cus){custSort=cus.dataset.custsort;render();return;}
-  const pfm=t.closest("[data-perfmode]");if(pfm){perfMode=pfm.dataset.perfmode;render();return;}
-  const pfc=t.closest("[data-perfch]");if(pfc){perfCh=pfc.dataset.perfch;render();return;}
+  const pfm=t.closest("[data-perfmode]");if(pfm){PERF.mode=pfm.dataset.perfmode;render();return;}
+  const pfc=t.closest("[data-perfch]");if(pfc){PERF.ch=pfc.dataset.perfch;render();return;}
   const au=t.closest("[data-auduser]");if(au){audUser=au.dataset.auduser;render();return;}
   const dsk=t.closest("[data-skusort]");if(dsk){skuSort=dsk.dataset.skusort;render();return;}
   const ac=t.closest("[data-acc]");if(ac){bankAcc=ac.dataset.acc;render();return;}
@@ -2475,7 +2632,7 @@ app.addEventListener("click",e=>{
   if(t.closest("[data-apall]")){apAll=!apAll;try{localStorage.setItem("kiso.apAll",apAll?"1":"0");}catch(e){}render();return;}
   const ed=t.closest("[data-edit]");if(ed){openForm(ed.dataset.edit,ed.dataset.id);return;}
   if(t.id==="saveSet")saveSettings();
-  if(t.closest("[data-import]")){openImport();return;}
+  {const imb=t.closest("[data-import]");if(imb){openImport(imb.dataset.import||null);return;}}
   if(t.closest("[data-more]")){salesLimit+=300;render();return;}
   if(t.id==="delImp"){if(t.dataset.ok){t.disabled=true;t.textContent="Menghapus…";deleteImports().catch(()=>toast("Sebagian data gagal dihapus. Coba lagi."));}else{t.dataset.ok=1;t.textContent="Klik lagi untuk menghapus semua data impor";}return;}
 });
@@ -2644,7 +2801,9 @@ function openForm(kind,id,preset){
     const its=Object.fromEntries((r.items||[]).map(i=>[i.productId,i.qty])),ps=sortBy("products").filter(p=>p.active!==false||its[p.id]);
     f=`<h2>${id?"Ubah barang keluar":"Barang keluar gudang"}</h2><div class="fgrid">
       ${F("Tanggal keluar",inp("date",r.date||today(),"date","required"))}${F("Untuk",`<select name="channel">${opt(KIRIM_CH,r.channel||SP)}</select>`)}
-      ${F("Jumlah resi / paket",inp("resi",r.resi||"","number",'step="1" min="0" inputmode="numeric"'))}</div>
+      ${F("Jumlah resi / paket",inp("resi",r.resi||"","number",'step="1" min="0" inputmode="numeric"'))}
+      ${F("Jenis sampel (jika Untuk = Sampel / promosi)",`<select name="sampleType">${opt([["","Belum dipilih"],["affiliate","Sampel affiliate"],["gratis","Sampel gratis"]],r.sampleType||"")}</select>`)}
+      ${F("Sampel untuk platform",`<select name="samplePlat">${opt([["","Belum dipilih"],[TT,TT],[SP,SP],["Lainnya","Lainnya"]],r.samplePlat||"")}</select>`)}</div>
       <p class="hint">Isi jumlah per produk sesuai resi yang dicetak dan barang yang benar-benar keluar dari gudang. Isi 1–4 mengurangi stok pack; isi 5–15 mengurangi piece sabun lepas.</p>
       <div class="fgrid">${ps.map(p=>F(esc(p.name),inp("q_"+p.id,its[p.id]||"","number",'step="1" min="0" inputmode="numeric" placeholder="0"'))).join("")}</div>
       ${F("Catatan",inp("note",r.note,"text",'placeholder="mis. batch sore, sampel KOL, kirim ulang"'),1)}<p class="hint" id="sumline"></p>`;
@@ -2797,7 +2956,7 @@ dform.addEventListener("submit",async e=>{
   }else if(k==="sret"){const its=items();if(!its.length){toast("Pilih minimal satu barang");return;}const st=g("settle");
     data={date:g("date"),supplier:g("supplier"),settle:st,account:st==="refund"?g("account"):"",note:g("note"),items:its.map(i=>({materialId:i.id,qty:i.qty,cost:i.price}))};
   }else if(k==="kirim"){const its=S.products.map(p=>({productId:p.id,qty:Math.round(+g("q_"+p.id)||0)})).filter(i=>i.qty>0);if(!its.length){toast("Isi jumlah minimal satu produk");return;}
-    data={date:g("date"),type:"kirim",channel:g("channel"),resi:+g("resi")||0,note:g("note"),items:its};
+    data={date:g("date"),type:"kirim",channel:g("channel"),resi:+g("resi")||0,note:g("note"),items:its};if(data.channel==="Sampel / promosi"){data.sampleType=g("sampleType")||"";data.samplePlat=g("samplePlat")||"";}
   }else if(k==="opname"){const d=g("date"),s=stockOf(d),w=[];
     for(const [key,val] of fd.entries()){if(!key.startsWith("o_")||String(val).trim()==="")continue;const t=key.slice(2),[a,i]=t.split(":"),sys=a==="p"?(s.P[i]||0):(s.Mt[i]||0),diff=(+val)-sys;
       if(diff)w.push({date:d,type:"opname",target:t,qty:diff,note:`Stock opname: sistem ${num(sys)} → fisik ${num(+val)}`,created:Date.now()});}
