@@ -910,7 +910,9 @@ function perfData(m,ch){
   const A=D.reduce((a,x)=>{for(const k of ["ads","adsGmv","adsOrders","impr","clicks"])a[k]=(a[k]||0)+x[k];return a;},{});
   /* CTR/CPC/CVR need clicks, which only some report days have: use those days only so the ratios are not mixed */
   const K=D.filter(x=>x.ctr!=null).reduce((a,x)=>{for(const k of ["ads","adsOrders","impr","clicks"])a[k]=(a[k]||0)+x[k];return a;},{});A.ctr=K.impr?K.clicks/K.impr:null;A.cpc=K.clicks?K.ads/K.clicks:null;A.cvr=K.clicks?K.adsOrders/K.clicks:null;
-  const pm=pmap();let soap=0,canc=0,all=0;
+  const pm=pmap();let soap=0,canc=0,all=0,smpC=0;
+  /* Rp0 sample orders are a promotion cost: break-even ROAS is measured on paid sales only */
+  for(const o of ORD())if((o.date||"").slice(0,7)===m&&(!C||o.channel===C)&&counts(o)&&o.imported){const t=orderTotals(o);if(!(t.gross>0))smpC+=t.fee+(t.refund||0)+t.hpp;}
   for(const o of ORD())if((o.date||"").slice(0,7)===m&&(!C||o.channel===C)&&!isSample(o)){all++;if(o.status==="batal"||o.status==="gagal")canc++;if(counts(o))for(const it of o.items||[])soap+=(+it.qty||0)*(+pm[it.productId]?.pcs||0);}
   /* fixed-cost plan for a month still running = last month's actual operating costs (the recurring-expense list was retired) */
   const recur=C?0:monthPL(perfPrevM(m)).opex;
@@ -921,7 +923,7 @@ function perfData(m,ch){
   const projG=complete?g:g/elapsed*nDays,projNet=complete?pl.net:projG*vr-fixed+pl.income*(nDays/elapsed);
   return{m,ch,C,pl,D,act,complete,elapsed,nDays,A,soap,canc,all,recur,fixedAct,fixedPlan,fixed,g,adsAll,var_,vr,be,aov,projG,projNet,
     cmr:g?pl.grossProfit/g:0,feeR:g?(pl.fee+pl.refund+pl.adj)/g:0,hppR:g?pl.hpp/g:0,tacos:g?adsAll/g:null,
-    roas:A.ads?A.adsGmv/A.ads:null,beRoas:pl.grossProfit>0?g/pl.grossProfit:null,soapPrice:soap?g/soap:null};
+    roas:A.ads?A.adsGmv/A.ads:null,smp:smpC,beRoas:pl.grossProfit+smpC>0?g/(pl.grossProfit+smpC):null,soapPrice:soap?g/soap:null};
 }
 const perfPrevM=m=>{const d=new Date(+m.slice(0,4),+m.slice(5,7)-2,1);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;};
 function perfFindings(P,mode,day){
@@ -1477,8 +1479,8 @@ function lapCnt(ch,a,b){let paid=0,samp=0;for(const o of ORD())if(o.channel===ch
 function lapKpis(T,P,label){
   const d=(a,b)=>b?` · <span class="${a>=b?"pos":"neg"}">${a>=b?"▲":"▼"} ${lapPc(Math.abs(a/b-1))}</span> vs ${label}`:"";
   const k=(l,v,s,c="")=>`<div class="kpi"><span>${l}</span><b class="${c}">${v}</b><span>${s}</span></div>`;
-  return`<div class="kpis">${k("Omzet kotor",rp0(T.gross),`${num(T.paid)} pesanan berbayar${T.samp?` · ${num(T.samp)} sampel Rp0`:""}${d(T.gross,P.gross)}`)}${k("Laba setelah iklan",rp0(T.profit),`Margin ${lapPc(T.margin)}${P.profit>0?d(T.profit,P.profit):""}`,T.profit<0?"neg":"")}${k("ROAS",f2(T.roas),`Impas ${f2(T.be)} · ${T.roas&&T.be?(T.roas>=T.be?'<span class="pos">di atas impas</span>':'<span class="neg">di bawah impas</span>'):T.roas?'<span class="neg">laba kotor minus, iklan pasti rugi</span>':"data iklan belum ada"}`)}${k("ROI iklan",lapPc(T.roi),`Laba setelah iklan ÷ biaya iklan ${rp0(T.ads)}`,T.roi!=null&&T.roi<0?"neg":"")}</div>
-  <div class="kpis">${k("AOV",T.aov?rp0(T.aov):"–",`Omzet ÷ pesanan berbayar${d(T.aov||0,P.aov||0)}`)}${k("ACOS · TACOS",`${lapPc(T.acos)} · ${lapPc(T.tacos)}`,`Batas ACOS (margin sebelum iklan) ${lapPc(T.gross?T.cm/T.gross:null)}`)}${k("CTR · CPC",`${lapPc(T.ctr)} · ${T.cpc?rp0(T.cpc):"–"}`,"Klik ÷ tayangan · biaya per klik")}${k("CVR iklan",lapPc(T.cvr),`Pesanan dari iklan ÷ klik · ${num(T.adsOrders)} pesanan iklan`)}</div>`;}
+  return`<div class="kpis">${k("Omzet kotor",rp0(T.gross),`${num(T.paid)} pesanan berbayar${T.samp?` · ${num(T.samp)} sampel Rp0`:""}${d(T.gross,P.gross)}`)}${k("Laba setelah iklan",rp0(T.profit),`Margin ${lapPc(T.margin)}${P.profit>0?d(T.profit,P.profit):""}`,T.profit<0?"neg":"")}${k("ROAS",f2(T.roas),`Impas ${f2(T.be)} (tanpa biaya sampel) · ${T.roas&&T.be?(T.roas>=T.be?'<span class="pos">di atas impas</span>':'<span class="neg">di bawah impas</span>'):T.roas?'<span class="neg">laba kotor minus, iklan pasti rugi</span>':"data iklan belum ada"}`)}${k("ROI iklan",lapPc(T.roi),`Laba setelah iklan ÷ biaya iklan ${rp0(T.ads)}`,T.roi!=null&&T.roi<0?"neg":"")}</div>
+  <div class="kpis">${k("AOV",T.aov?rp0(T.aov):"–",`Omzet ÷ pesanan berbayar${d(T.aov||0,P.aov||0)}`)}${k("ACOS · TACOS",`${lapPc(T.acos)} · ${lapPc(T.tacos)}`,`Batas ACOS (margin penjualan berbayar) ${lapPc(T.gross&&T.core!=null?T.core/T.gross:null)}`)}${k("CTR · CPC",`${lapPc(T.ctr)} · ${T.cpc?rp0(T.cpc):"–"}`,"Klik ÷ tayangan · biaya per klik")}${k("CVR iklan",lapPc(T.cvr),`Pesanan dari iklan ÷ klik · ${num(T.adsOrders)} pesanan iklan`)}</div>`;}
 /* SKU sold: every product from isi 1 up, including those that sold 0. Units/orders exclude Rp0 sample orders; profit from skuStats (same estimate as elsewhere) */
 function lapSkuMerge(ch,a,b){const M0={};for(let m=a.slice(0,7);m<=b.slice(0,7);m=lapNextM(m)){const f=a>m+"-01"?a:m+"-01",t=b<endOf(m)?b:endOf(m);
   for(const r of skuStats(m,ch,f,t)){const y=M0[r.id]||={gross:0,cm:0,ads:0,profit:0};for(const k of ["gross","cm","ads","profit"])y[k]+=r[k]||0;}}return M0;}
@@ -1596,7 +1598,7 @@ function lapView(ch){
     ctrl=`<button class="btn sm" data-lapwk="${ch}|-1">◀</button><span class="hint"><b>${fdate(a)} – ${fdate(b)}</b>${b>T0?" (berjalan)":""}</span><button class="btn sm" data-lapwk="${ch}|1"${addDays(a,7)>T0?" disabled":""}>▶</button>`;if(b>T0){b=T0;pb=addDays(pa,mdays(a,b)-1);plabel="minggu lalu, hari yang sama";}}
   else{a=m+"-01";b=endOf(m)<T0?endOf(m):T0;const pm0=perfPrevM(m);pa=pm0+"-01";pb=addDays(pa,mdays(a,b)-1);if(pb>endOf(pm0))pb=endOf(pm0);plabel=`${mshort(pm0)} periode sama`;
     ctrl=`<span class="hint">${esc(mname(m))} · ganti bulan lewat Periode di kanan atas</span>`;}
-  const R=lapRows(ch,a,b),T=lapAgg(R),P=lapAgg(lapRows(ch,pa,pb));Object.assign(T,lapCnt(ch,a,b));Object.assign(P,lapCnt(ch,pa,pb));T.aov=T.paid?T.gross/T.paid:null;P.aov=P.paid?P.gross/P.paid:null;
+  const R=lapRows(ch,a,b),T=lapAgg(R),P=lapAgg(lapRows(ch,pa,pb));Object.assign(T,lapCnt(ch,a,b));{const n=lapNum(ch,a,b,mode,T.ads);T.core=n.core;T.be=n.core>0?T.gross/n.core:null;}Object.assign(P,lapCnt(ch,pa,pb));T.aov=T.paid?T.gross/T.paid:null;P.aov=P.paid?P.gross/P.paid:null;
   const go=[["lap-pl","Laba rugi"],["lap-rugi","Penyebab laba/rugi"],["lap-kes","Kesimpulan"],["lap-sku","SKU"],["lap-hari","Per hari"],...(mode==="bulan"?[["lap-iklan","Iklan & analitik"]]:[]),...(ch===TT||mode==="bulan"?[["lap-video","Video"]]:[]),["lap-smp","Sampel & affiliate"]];
   const head=`<div class="row"><h2>Laporan ${nm}</h2><div class="sp"></div>${imp}</div><div class="row">${modes}${ctrl}</div>
   <div class="chips">${go.map(([id,l])=>`<button data-lapgo="${id}">${l}</button>`).join("")}</div>`;
