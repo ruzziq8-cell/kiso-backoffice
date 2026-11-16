@@ -926,6 +926,11 @@ function perfData(m,ch){
     roas:A.ads?A.adsGmv/A.ads:null,smp:smpC,beRoas:pl.grossProfit+smpC>0?g/(pl.grossProfit+smpC):null,soapPrice:soap?g/soap:null};
 }
 const perfPrevM=m=>{const d=new Date(+m.slice(0,4),+m.slice(5,7)-2,1);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;};
+/* skuStats with Rp0 sample orders taken out of each SKU's profit (their cost is a promotion cost, reported separately) */
+function skuPaid(m,ch,from,to){const R=skuStats(m,ch,from,to),by=Object.fromEntries(R.map(r=>[r.id,r]));
+  for(const o of ORD())if(o.date>=from&&o.date<=to&&counts(o)&&(ch==="Semua"||o.channel===ch)){const t=orderTotals(o);if(t.gross>0)continue;const q=t.qty||1;
+    for(const it of o.items||[]){const y=by[it.productId];if(!y)continue;const c=(t.fee+(t.refund||0))*(+it.qty||0)/q+(+it.qty||0)*(+it.hpp||hppOf(it.productId));y.cm+=c;y.profit+=c;y.hpp-=(+it.qty||0)*(+it.hpp||hppOf(it.productId));}}
+  return R.map(r=>({...r,be:r.cm>0?r.gross/r.cm:null,roi:r.ads?r.profit/r.ads:null,margin:r.gross?r.profit/r.gross:null}));}
 function perfFindings(P,mode,day){
   const F=[],add=(lvl,title,text,acts,horizon)=>F.push({lvl,title,text,acts:acts||[],horizon:horizon||"7"});
   const pc=v=>v==null||!isFinite(v)?"–":(v*100).toFixed(1).replace(".",",")+"%";
@@ -947,7 +952,7 @@ function perfFindings(P,mode,day){
   if(P.feeR>0.25){const top=Object.entries(pl.feeBy).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,v])=>`${k} ${pc(v/g)}`).join(", ");
     add("warn","Potongan marketplace besar",`Potongan + retur ${pc(P.feeR)} dari omzet. Terbesar: ${top}.`,["Tinjau voucher dan subsidi ongkir yang ditanggung penjual","Evaluasi komisi affiliate per kreator: pertahankan yang menghasilkan","Pastikan program biaya tambahan (Gratis Ongkir XTRA, Growth Xtra) sepadan dengan kenaikan penjualannya"],"30");}
   /* 4. SKU */
-  const from=mode==="hari"?day:P.m+"-01",to=mode==="hari"?day:endOf(P.m),K=skuStats(P.m,P.ch,from,to).filter(r=>r.gross>0).sort((a,b)=>b.profit-a.profit);
+  const from=mode==="hari"?day:P.m+"-01",to=mode==="hari"?day:endOf(P.m),K=skuPaid(P.m,P.ch,from,to).filter(r=>r.gross>0).sort((a,b)=>b.profit-a.profit);
   const losers=K.filter(r=>r.profit<0),best=K[0];
   if(losers.length)add("bad","SKU yang rugi setelah iklan",losers.map(r=>`${r.name} (laba ${rp0(r.profit)}, ROAS ${f2(r.roas)} vs impas ${f2(r.be)})`).join("; ")+".",["Naikkan harga atau kurangi diskon SKU tersebut","Hentikan iklan khusus SKU tersebut dan arahkan ke paket yang lebih untung","Jadikan SKU kecil sebagai pintu masuk, lalu tawarkan paket lebih besar (bundling)"],"7");
   if(best&&best.profit>0)add("good",`SKU paling menguntungkan: ${best.name}`,`Laba setelah iklan ${rp0(best.profit)} dari ${num(best.units)} pcs (margin ${pc(best.gross?best.profit/best.gross:null)}).`,["Prioritaskan SKU ini di LIVE, video, dan kampanye iklan","Pastikan stoknya tidak pernah kosong"],"30");
