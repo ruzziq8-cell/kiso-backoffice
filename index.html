@@ -1551,6 +1551,39 @@ function lapPL(ch,a,b,mode,adsT){let L;
   <tr style="font-weight:700;background:var(--sunk)"><td>Laba setelah iklan (kontribusi ${esc(ch)})</td><td class="n ${res<0?"neg":"pos"}">${rp0(res)}</td><td class="n">${pc(res)}</td></tr>
   </tbody></table></div><p class="hint">Sampai kontribusi channel: beban operasional bersama (gaji, listrik, dll.), affiliate yang dibayar terpisah, dan penyusutan tidak dibagi per platform; lihat laba bersih perusahaan di Dashboard. ${mode==="bulan"?"Angka bulanan sama dengan kolom channel di tabel Laba rugi per marketplace di Dashboard.":"Iklan harian/mingguan: TikTok dari Campaign overview per hari, Shopee dari laporan iklan yang dibagi rata per hari. Potongan pesanan yang belum cair masih estimasi."}</p></div>`;}
 function lapLastDay(ch){const T0=today();let d="";for(const o of ORD())if(o.channel===ch&&counts(o)&&o.date<=T0&&o.date>d)d=o.date;return d||T0;}
+/* why a period lost (or made) money: paid-sales gross profit, sample cost, ads (Meta separately for Shopee), marketplace adjustments; compared with the previous period */
+function lapNum(ch,a,b,mode,ads){const X={G:0,fee:0,ref:0,adj:0,hpp:0,inc:0,smp:0,smpN:0,aff:0,affG:0,ads};
+  if(mode==="bulan"){const p=monthPL(a.slice(0,7),ch);X.G=p.gross;X.fee=p.fee;X.ref=p.refund;X.adj=p.adj||0;X.hpp=p.hpp;X.inc=Object.values(p.incomeBy||{}).reduce((s,v)=>s+v,0);X.ads=p.ads;}
+  for(const o of ORD())if(o.channel===ch&&o.date>=a&&o.date<=b&&counts(o)){const t=orderTotals(o);
+    if(mode!=="bulan"){X.G+=t.gross;X.fee+=t.fee;X.ref+=t.refund||0;X.hpp+=t.hpp;}
+    if(!(t.gross>0)){X.smp+=t.fee+(t.refund||0)+t.hpp;X.smpN++;}else if(o.creator){X.aff++;X.affG+=t.gross;}}
+  X.cm=X.G-X.fee-X.ref-X.adj-X.hpp;X.res=X.cm-X.ads+X.inc;X.core=X.cm+X.smp;X.coreR=X.G?X.core/X.G:0;
+  X.meta=ch===SP?metaAdSpend(a,b):0;return X;}
+function lapLoss(ch,a,b,pa,pb,mode,T,P,plabel){
+  const C=lapNum(ch,a,b,mode,T.ads),Q=lapNum(ch,pa,pb,mode==="bulan"?"bulanPrev":mode,P.ads);
+  const pc=v=>C.G?lapPc(v/C.G):"–",R=[];
+  if(C.smp>0)R.push([C.smp,`<b>Biaya sampel affiliate ${rp0(C.smp)}</b> (${pc(C.smp)} dari omzet): ${num(C.smpN)} sampel Rp0 × ±${rp0(C.smp/C.smpN)} (ongkir yang dipotong marketplace + HPP produk). Tanpa biaya sampel, hasil periode ini <b>${rp0(C.res+C.smp)}</b>.${ch===TT?` Hasil sampel: ${num(C.aff)} pesanan affiliate (${C.smpN?(C.aff/C.smpN).toFixed(1).replace(".",","):"–"} per sampel)${Q.smpN?`, ${plabel} ${(Q.aff/Q.smpN).toFixed(1).replace(".",",")} per sampel`:""}. Sampel baru biasanya baru menghasilkan video 1–3 minggu setelah dikirim.`:""}`]);
+  const ownAds=C.ads-C.meta,core=C.coreR;
+  if(C.meta>0)R.push([C.meta,`<b>Iklan Meta ${rp0(C.meta)}</b> (${pc(C.meta)} dari omzet) tanpa penjualan. Tanpa Meta, hasil periode ini <b>${rp0(C.res+C.meta)}</b>.`]);
+  if(ownAds>0&&core>0){const gm=T.adsGmv,earn=Math.max(0,gm)*core,loss=ownAds-earn,be=1/core,roas=ownAds?gm/ownAds:null;
+    if(loss>0)R.push([loss,`<b>Iklan ${ch===SP?"Shopee":"TikTok"} merugi ±${rp0(loss)}</b>: biaya ${rp0(ownAds)}, ROAS ${f2(roas)} di bawah impas ${f2(be)} (impas dihitung dari margin penjualan berbayar ${lapPc(core)}, tanpa biaya sampel${ch===SP?"; biaya Shopee sudah termasuk PPN iklan 11% dan omzet iklan dari laporan Shopee dibagi rata per hari, jadi angka ini perkiraan":""}).`]);
+    else R.push([0,`Iklan ${ch===SP?"Shopee":"TikTok"} masih untung: biaya ${rp0(ownAds)}, ROAS ${f2(roas)} di atas impas ${f2(be)} (margin penjualan berbayar ${lapPc(core)}). <b>Iklan bukan penyebab rugi.</b>`]);}
+  if(Q.G>0&&C.G<Q.G*0.9){const lost=(Q.G-C.G)*core;R.push([lost,`<b>Omzet turun ${lapPc(1-C.G/Q.G)}</b> dibanding ${plabel} (${rp0(C.G)} vs ${rp0(Q.G)}): laba kotor yang hilang ±${rp0(lost)}.`]);}
+  if(C.inc)R.push([0,`Pendapatan/penyesuaian marketplace ${rp0(C.inc)} sudah ikut dihitung.`]);
+  R.sort((x,y)=>y[0]-x[0]);
+  const row=(l,v,q,b)=>`<tr${b?' style="font-weight:700"':""}><td>${l}</td><td class="n ${v<-0.5?"neg":""}">${rp0(v)}</td><td class="n mut">${pc(v)}</td><td class="n ${q<-0.5?"neg":""}">${rp0(q)}</td></tr>`;
+  const ttl=C.res<0?`Kenapa rugi ${rp0(-C.res)}`:`Dari mana laba ${rp0(C.res)}`;
+  return`<div class="panel" id="lap-rugi"><h3>${ttl}</h3>
+  <div class="tbl"><table><thead><tr><th></th><th class="n">Periode ini</th><th class="n">% omzet</th><th class="n">${esc(plabel)}</th></tr></thead><tbody>
+  ${row("Laba kotor penjualan berbayar (setelah potongan & HPP, sebelum sampel dan iklan)",C.core,Q.core)}
+  ${row(`− Biaya sampel affiliate (${num(C.smpN)} sampel: ongkir + HPP)`,-C.smp,-Q.smp)}
+  ${ch===SP?row("− Iklan Shopee",-ownAds,-(Q.ads-Q.meta))+row("− Iklan Meta (afiliasi Shopee)",-C.meta,-Q.meta):row("− Iklan TikTok",-C.ads,-Q.ads)}
+  ${C.inc||Q.inc?row("± Pendapatan / penyesuaian marketplace",C.inc,Q.inc):""}
+  ${row(`= Laba setelah iklan (kontribusi ${esc(ch)})`,C.res,Q.res,1)}
+  </tbody></table></div>
+  <h3 style="margin-top:6px">Penyebab, diurutkan dari yang terbesar</h3>
+  ${R.map(([,s])=>`<div style="padding:6px 0;border-top:1px solid var(--line)">• ${s}</div>`).join("")||'<p class="hint">Belum cukup data.</p>'}
+  <p class="hint">Biaya sampel = pesanan Rp0 di ${esc(ch)} (ongkir yang dipotong marketplace, termasuk estimasi untuk yang belum cair, ditambah HPP). Sampel yang dikirim sendiri lewat Barang keluar tidak termasuk di sini. Kolom kanan = ${esc(plabel)} untuk perbandingan.</p></div>`;}
 function lapDefDay(ch){const m=M(),T0=today(),days=ORD().filter(o=>o.channel===ch&&(o.date||"").slice(0,7)===m&&o.date<=T0&&counts(o)).map(o=>o.date).sort();return days[days.length-1]||(m===T0.slice(0,7)?T0:endOf(m));}
 function lapView(ch){
   const nm=ch===SP?"Shopee":"TikTok Shop",mode=LAP.mode[ch]||"bulan",m=M(),T0=today();
@@ -1560,15 +1593,15 @@ function lapView(ch){
   if(mode==="hari"){let d=LAP.day[ch];if(!d||d.slice(0,7)!==m)d=lapDefDay(ch);a=b=d;pa=pb=addDays(d,-1);plabel="kemarin";
     ctrl=`<label class="hint" style="display:flex;gap:6px;align-items:center">Tanggal <input type="date" data-lapday="${ch}" value="${d}" max="${T0}" style="width:auto"></label>`;}
   else if(mode==="minggu"){let s=LAP.wk[ch]||wkMon(lapLastDay(ch));a=s;b=addDays(s,6);pa=addDays(s,-7);pb=addDays(s,-1);plabel="minggu lalu";
-    ctrl=`<button class="btn sm" data-lapwk="${ch}|-1">◀</button><span class="hint"><b>${fdate(a)} – ${fdate(b)}</b>${b>T0?" (berjalan)":""}</span><button class="btn sm" data-lapwk="${ch}|1"${addDays(a,7)>T0?" disabled":""}>▶</button>`;if(b>T0)b=T0;}
+    ctrl=`<button class="btn sm" data-lapwk="${ch}|-1">◀</button><span class="hint"><b>${fdate(a)} – ${fdate(b)}</b>${b>T0?" (berjalan)":""}</span><button class="btn sm" data-lapwk="${ch}|1"${addDays(a,7)>T0?" disabled":""}>▶</button>`;if(b>T0){b=T0;pb=addDays(pa,mdays(a,b)-1);plabel="minggu lalu, hari yang sama";}}
   else{a=m+"-01";b=endOf(m)<T0?endOf(m):T0;const pm0=perfPrevM(m);pa=pm0+"-01";pb=addDays(pa,mdays(a,b)-1);if(pb>endOf(pm0))pb=endOf(pm0);plabel=`${mshort(pm0)} periode sama`;
     ctrl=`<span class="hint">${esc(mname(m))} · ganti bulan lewat Periode di kanan atas</span>`;}
   const R=lapRows(ch,a,b),T=lapAgg(R),P=lapAgg(lapRows(ch,pa,pb));Object.assign(T,lapCnt(ch,a,b));Object.assign(P,lapCnt(ch,pa,pb));T.aov=T.paid?T.gross/T.paid:null;P.aov=P.paid?P.gross/P.paid:null;
-  const go=[["lap-pl","Laba rugi"],["lap-kes","Kesimpulan"],["lap-sku","SKU"],["lap-hari","Per hari"],...(mode==="bulan"?[["lap-iklan","Iklan & analitik"]]:[]),...(ch===TT||mode==="bulan"?[["lap-video","Video"]]:[]),["lap-smp","Sampel & affiliate"]];
+  const go=[["lap-pl","Laba rugi"],["lap-rugi","Penyebab laba/rugi"],["lap-kes","Kesimpulan"],["lap-sku","SKU"],["lap-hari","Per hari"],...(mode==="bulan"?[["lap-iklan","Iklan & analitik"]]:[]),...(ch===TT||mode==="bulan"?[["lap-video","Video"]]:[]),["lap-smp","Sampel & affiliate"]];
   const head=`<div class="row"><h2>Laporan ${nm}</h2><div class="sp"></div>${imp}</div><div class="row">${modes}${ctrl}</div>
   <div class="chips">${go.map(([id,l])=>`<button data-lapgo="${id}">${l}</button>`).join("")}</div>`;
   if(!T.gross&&!T.ads&&mode!=="bulan")return head+lapKpis(T,P,plabel)+lapPL(ch,a,b,mode,T.ads)+emptyBox(`Belum ada penjualan ${nm} di periode ini`,"Pilih tanggal lain atau impor file pesanan.")+lapSamples(ch,a,b);
-  let body=lapKpis(T,P,plabel)+lapPL(ch,a,b,mode,T.ads);
+  let body=lapKpis(T,P,plabel)+lapPL(ch,a,b,mode,T.ads)+lapLoss(ch,a,b,pa,pb,mode,T,P,plabel);
   if(mode==="bulan"){
     body+=`<div id="lap-kes" style="display:grid;gap:20px;min-width:0">${lapNoKpi(V.perf({embed:true,mode:"bulan",ch}))}</div>`;
     body+=lapSku(ch,a,b);
